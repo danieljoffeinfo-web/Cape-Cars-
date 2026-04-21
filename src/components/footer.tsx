@@ -13,7 +13,8 @@ export default function Footer() {
     <footer className="relative mt-32 border-t border-black/[0.08] bg-[#efece5]">
       <div className="max-w-7xl mx-auto px-6 md:px-10 py-16 grid grid-cols-1 md:grid-cols-4 gap-10">
         <div className="md:col-span-2">
-          <Image src="/cape-cars-logo.png" alt="Cape Cars" width={140} height={56} className="object-contain h-12 w-auto" />
+          <Image src="/cape-cars-logo.png" alt="Cape Cars" width={220} height={88} className="object-contain h-20 w-auto" />
+          <p className="mt-2 text-sm tracking-[0.15em] uppercase text-neutral-500">Cape Cars</p>
           <h3 className="mt-4 text-3xl md:text-4xl font-light text-neutral-900 leading-tight max-w-md">
             Where the keys are yours for the day.
           </h3>

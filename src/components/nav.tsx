@@ -35,9 +35,9 @@ export default function Nav({ active, theme = 'light' }: { active: string; theme
             <Image
               src="/cape-cars-logo.png"
               alt="Cape Cars"
-              width={120}
-              height={48}
-              className="object-contain h-10 w-auto brightness-0 invert"
+              width={180}
+              height={72}
+              className="object-contain h-14 w-auto brightness-0 invert"
               priority
             />
           </Link>
