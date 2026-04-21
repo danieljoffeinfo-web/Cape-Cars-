@@ -6,8 +6,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'], weight: ['300', '400', '500', '600', '700'] })
 
 export const metadata: Metadata = {
-  title: 'Cape Cars — Keys for the day.',
-  description: "Cape Town's premier car rental experience. Cape Cars — premium vehicles, rented by the day.",
+  title: 'Car Demo — Keys for the day.',
+  description: "Cape Town's premier car rental experience. Car Demo — premium vehicles, rented by the day.",
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

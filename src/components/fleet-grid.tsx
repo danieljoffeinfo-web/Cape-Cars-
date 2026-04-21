@@ -3,23 +3,29 @@
 import { useState, useMemo } from 'react'
 import { GlassDark } from './glass'
 import { Icon } from './icon'
-import type { Car } from '@/lib/fleet'
+import type { Vehicle } from '@/lib/fleet'
 
 const CATS = ['All', 'Track', 'Supercar', 'Grand Tourer', 'Electric', 'Daily']
 
-function FleetCard({ car }: { car: Car }) {
+function FleetCard({ car }: { car: Vehicle }) {
   const bookable = car.status === 'Available'
   return (
     <GlassDark className="rounded-2xl overflow-hidden flex flex-col group">
-      {/* Image placeholder */}
+      {/* Image */}
       <div className="aspect-[5/4] relative bg-gradient-to-br from-white/[0.08] via-white/[0.03] to-white/[0.02] overflow-hidden">
-        <div
-          className="absolute inset-0 opacity-35"
-          style={{ backgroundImage: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.06) 0 2px, transparent 2px 18px)' }}
-        />
-        <div className="absolute inset-0 flex items-center justify-center text-white/25 font-mono text-[11px] tracking-wider uppercase">
-          {car.model} · {car.color}
-        </div>
+        {car.image_url ? (
+          <img src={car.image_url} alt={car.model} className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <>
+            <div
+              className="absolute inset-0 opacity-35"
+              style={{ backgroundImage: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.06) 0 2px, transparent 2px 18px)' }}
+            />
+            <div className="absolute inset-0 flex items-center justify-center text-white/25 font-mono text-[11px] tracking-wider uppercase">
+              {car.model} · {car.color}
+            </div>
+          </>
+        )}
 
         {/* Status pill */}
         <div className="absolute top-3 left-3 flex items-center gap-1.5 text-[10px] tracking-[0.2em] uppercase px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/15 text-white">
@@ -77,7 +83,7 @@ function FleetCard({ car }: { car: Car }) {
   )
 }
 
-export default function FleetGrid({ cars: initialCars }: { cars: Car[] }) {
+export default function FleetGrid({ cars: initialCars }: { cars: Vehicle[] }) {
   const [cat, setCat] = useState('All')
   const [sort, setSort] = useState('featured')
   const [q, setQ] = useState('')

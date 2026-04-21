@@ -4,7 +4,7 @@ import Footer from '@/components/footer'
 import { GlassDark } from '@/components/glass'
 import { Icon } from '@/components/icon'
 
-export const metadata = { title: 'Services — Cape Cars' }
+export const metadata = { title: 'Services — Car Demo' }
 
 const TIERS = [
   {

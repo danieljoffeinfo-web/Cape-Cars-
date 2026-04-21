@@ -38,7 +38,7 @@ export default function AdminDashboard() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-light text-neutral-900 tracking-tight">Good morning, Admin.</h1>
-          <p className="mt-1 text-sm text-neutral-500">Here&apos;s what&apos;s happening at Cape Cars today.</p>
+          <p className="mt-1 text-sm text-neutral-500">Here&apos;s what&apos;s happening at Car Demo today.</p>
         </div>
         <Link
           href="/"

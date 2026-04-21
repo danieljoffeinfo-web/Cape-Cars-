@@ -1,0 +1,328 @@
+'use client'
+
+import { useState, useRef, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import type { Vehicle } from '@/lib/fleet'
+
+type ModalProps = {
+  vehicle?: Vehicle | null
+  onClose: () => void
+  onSaved: () => void
+}
+
+const CATS = ['Track', 'Supercar', 'Grand Tourer', 'Electric', 'Daily'] as const
+const FUELS = ['Petrol', 'Hybrid', 'Electric'] as const
+const STATUSES = ['Available', 'Booked', 'Service'] as const
+
+const empty = (): Omit<Vehicle, 'id' | 'created_at'> => ({
+  model: '',
+  cat: 'Track',
+  power: '',
+  seats: 2,
+  fuel: 'Petrol',
+  rate: 0,
+  status: 'Available',
+  color: '',
+  description: '',
+  image_url: null,
+  sort_order: 0,
+})
+
+export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) {
+  const supabase = createClient()
+  const isEdit = !!vehicle
+  const [form, setForm] = useState(vehicle ? { ...vehicle } : { id: '', ...empty() })
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(vehicle?.image_url ?? null)
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const set = (k: string, v: string | number | null) =>
+    setForm(f => ({ ...f, [k]: v }))
+
+  const handleFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return
+    setImageFile(file)
+    const reader = new FileReader()
+    reader.onload = e => setImagePreview(e.target?.result as string)
+    reader.readAsDataURL(file)
+  }
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  }, [])
+
+  const save = async () => {
+    if (!form.model.trim()) { setError('Model name is required'); return }
+    setSaving(true)
+    setError(null)
+
+    try {
+      let image_url = form.image_url
+
+      if (imageFile) {
+        const ext = imageFile.name.split('.').pop()
+        const path = `${Date.now()}.${ext}`
+        const { error: uploadError } = await supabase.storage
+          .from('vehicles')
+          .upload(path, imageFile, { upsert: true })
+        if (uploadError) throw uploadError
+        const { data: urlData } = supabase.storage.from('vehicles').getPublicUrl(path)
+        image_url = urlData.publicUrl
+      }
+
+      const payload = {
+        model: form.model.trim(),
+        cat: form.cat,
+        power: form.power,
+        seats: Number(form.seats),
+        fuel: form.fuel,
+        rate: Number(form.rate),
+        status: form.status,
+        color: form.color,
+        description: form.description,
+        image_url,
+        sort_order: Number(form.sort_order) || 0,
+      }
+
+      if (isEdit && vehicle?.id) {
+        const { error: upsertError } = await supabase
+          .from('vehicles')
+          .update(payload)
+          .eq('id', vehicle.id)
+        if (upsertError) throw upsertError
+      } else {
+        const { error: insertError } = await supabase.from('vehicles').insert(payload)
+        if (insertError) throw insertError
+      }
+
+      onSaved()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteVehicle = async () => {
+    if (!vehicle?.id) return
+    setDeleting(true)
+    await supabase.from('vehicles').delete().eq('id', vehicle.id)
+    onSaved()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+
+      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-black/[0.06] px-7 py-5 flex items-center justify-between rounded-t-3xl z-10">
+          <div>
+            <h2 className="text-lg font-medium text-neutral-900">{isEdit ? 'Edit vehicle' : 'Add vehicle'}</h2>
+            <p className="text-xs text-neutral-400 mt-0.5">{isEdit ? vehicle.model : 'New listing'}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-neutral-100 hover:bg-neutral-200 transition-colors flex items-center justify-center text-neutral-500">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div className="px-7 py-6 space-y-6">
+          {/* Image upload */}
+          <div>
+            <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-2">Vehicle image</label>
+            <div
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={`relative rounded-2xl border-2 border-dashed transition-colors cursor-pointer overflow-hidden ${
+                dragging ? 'border-neutral-400 bg-neutral-50' : 'border-black/[0.1] hover:border-black/20 bg-neutral-50/50'
+              }`}
+            >
+              {imagePreview ? (
+                <div className="relative aspect-[16/7]">
+                  <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/20 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="text-white text-sm font-medium">Change image</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="aspect-[16/7] flex flex-col items-center justify-center gap-2 text-neutral-400">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>
+                  <div className="text-sm">Drop image here or <span className="text-neutral-900 underline underline-offset-2">browse</span></div>
+                  <div className="text-xs text-neutral-400">JPG, PNG, WEBP</div>
+                </div>
+              )}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+          </div>
+
+          {/* Model + Color */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Model *</label>
+              <input
+                value={form.model}
+                onChange={e => set('model', e.target.value)}
+                placeholder="e.g. Porsche 911 GT3"
+                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 placeholder:text-neutral-300 focus:outline-none focus:border-neutral-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Color</label>
+              <input
+                value={form.color}
+                onChange={e => set('color', e.target.value)}
+                placeholder="e.g. Shark Blue"
+                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 placeholder:text-neutral-300 focus:outline-none focus:border-neutral-400 bg-white"
+              />
+            </div>
+          </div>
+
+          {/* Category + Fuel */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Category</label>
+              <select
+                value={form.cat}
+                onChange={e => set('cat', e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
+              >
+                {CATS.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Fuel</label>
+              <select
+                value={form.fuel}
+                onChange={e => set('fuel', e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
+              >
+                {FUELS.map(f => <option key={f}>{f}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Power + Seats + Rate */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Power</label>
+              <input
+                value={form.power}
+                onChange={e => set('power', e.target.value)}
+                placeholder="502 hp"
+                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 placeholder:text-neutral-300 focus:outline-none focus:border-neutral-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Seats</label>
+              <input
+                type="number"
+                value={form.seats}
+                onChange={e => set('seats', e.target.value)}
+                min={1} max={9}
+                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Rate / day (R)</label>
+              <input
+                type="number"
+                value={form.rate}
+                onChange={e => set('rate', e.target.value)}
+                min={0}
+                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
+              />
+            </div>
+          </div>
+
+          {/* Status */}
+          <div>
+            <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Status</label>
+            <div className="flex gap-2">
+              {STATUSES.map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => set('status', s)}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all border ${
+                    form.status === s
+                      ? s === 'Available' ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : s === 'Booked' ? 'bg-amber-50 border-amber-200 text-amber-700'
+                        : 'bg-red-50 border-red-200 text-red-600'
+                      : 'bg-neutral-50 border-black/[0.08] text-neutral-500 hover:bg-neutral-100'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Description</label>
+            <textarea
+              value={form.description ?? ''}
+              onChange={e => set('description', e.target.value)}
+              placeholder="Describe the vehicle — driving experience, features, what makes it special..."
+              rows={3}
+              className="w-full px-4 py-3 rounded-xl border border-black/[0.1] text-sm text-neutral-900 placeholder:text-neutral-300 focus:outline-none focus:border-neutral-400 bg-white resize-none"
+            />
+          </div>
+
+          {error && (
+            <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-600">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-black/[0.06] px-7 py-5 flex items-center justify-between rounded-b-3xl">
+          <div>
+            {isEdit && !confirmDelete && (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="text-sm text-red-400 hover:text-red-600 transition-colors"
+              >
+                Delete vehicle
+              </button>
+            )}
+            {confirmDelete && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-neutral-500">Sure?</span>
+                <button onClick={deleteVehicle} disabled={deleting} className="text-sm text-red-500 font-medium hover:text-red-700">
+                  {deleting ? 'Deleting…' : 'Yes, delete'}
+                </button>
+                <button onClick={() => setConfirmDelete(false)} className="text-sm text-neutral-400 hover:text-neutral-700">
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="px-5 py-2.5 rounded-full border border-black/[0.1] text-sm text-neutral-600 hover:bg-neutral-50 transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-6 py-2.5 rounded-full bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add vehicle'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

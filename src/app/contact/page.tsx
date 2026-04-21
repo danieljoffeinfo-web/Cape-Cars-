@@ -5,7 +5,7 @@ import { GlassDark } from '@/components/glass'
 import { Icon } from '@/components/icon'
 import BookingForm from '@/components/booking-form'
 
-export const metadata = { title: 'Contact — Cape Cars' }
+export const metadata = { title: 'Contact — Car Demo' }
 
 const MAPS_URL = 'https://www.google.com/maps/search/?api=1&query=Killarney+Raceway+Cape+Town'
 

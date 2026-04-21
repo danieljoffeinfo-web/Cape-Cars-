@@ -34,13 +34,13 @@ export default function Nav({ active, theme = 'light' }: { active: string; theme
           <Link href="/" className="flex items-center gap-3 group">
             <Image
               src="/cape-cars-logo.png"
-              alt="Cape Cars"
+              alt="Car Demo"
               width={240}
               height={96}
               className="object-contain h-20 w-auto brightness-0 invert"
               priority
             />
-            <span className="text-white font-semibold text-xl tracking-wide hidden sm:block">Cape Cars</span>
+            <span className="text-[15px] tracking-[0.22em] uppercase font-medium text-white hidden sm:block">Car Demo</span>
           </Link>
 
           {/* Desktop nav */}

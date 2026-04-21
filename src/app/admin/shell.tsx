@@ -46,7 +46,7 @@ function PinLock({ onUnlock }: { onUnlock: () => void }) {
           <span className="w-2 h-2 rounded-full bg-white/80" />
         </span>
         <span className="text-[13px] tracking-[0.28em] uppercase font-medium text-white/70">
-          Cape Cars
+          Car Demo
         </span>
       </div>
 
