@@ -31,15 +31,16 @@ export default function Nav({ active, theme = 'light' }: { active: string; theme
       <Shell className="mx-auto max-w-7xl rounded-2xl transition-all duration-500">
         <div className="flex items-center justify-between px-5 md:px-7 py-3.5">
           {/* Wordmark */}
-          <Link href="/" className="flex items-center gap-2 group">
+          <Link href="/" className="flex items-center gap-3 group">
             <Image
               src="/cape-cars-logo.png"
               alt="Cape Cars"
-              width={180}
-              height={72}
-              className="object-contain h-14 w-auto brightness-0 invert"
+              width={240}
+              height={96}
+              className="object-contain h-20 w-auto brightness-0 invert"
               priority
             />
+            <span className="text-white font-semibold text-xl tracking-wide hidden sm:block">Cape Cars</span>
           </Link>
 
           {/* Desktop nav */}
