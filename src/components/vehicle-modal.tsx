@@ -14,24 +14,34 @@ const CATS = ['Track', 'Supercar', 'Grand Tourer', 'Electric', 'Daily'] as const
 const FUELS = ['Petrol', 'Hybrid', 'Electric'] as const
 const STATUSES = ['Available', 'Booked', 'Service'] as const
 
-const empty = (): Omit<Vehicle, 'id' | 'created_at'> => ({
+const emptyForm = () => ({
+  id: '',
   model: '',
-  cat: 'Track',
+  cat: 'Track' as const,
   power: '',
   seats: 2,
-  fuel: 'Petrol',
+  fuel: 'Petrol' as const,
   rate: 0,
-  status: 'Available',
+  status: 'Available' as const,
   color: '',
   description: '',
-  image_url: null,
+  image_url: null as string | null,
   sort_order: 0,
 })
+
+async function encodeImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
 export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) {
   const supabase = createClient()
   const isEdit = !!vehicle
-  const [form, setForm] = useState(vehicle ? { ...vehicle } : { id: '', ...empty() })
+  const [form, setForm] = useState(vehicle ? { ...vehicle } : emptyForm())
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(vehicle?.image_url ?? null)
   const [saving, setSaving] = useState(false)
@@ -68,14 +78,7 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
       let image_url = form.image_url
 
       if (imageFile) {
-        const ext = imageFile.name.split('.').pop()
-        const path = `${Date.now()}.${ext}`
-        const { error: uploadError } = await supabase.storage
-          .from('vehicles')
-          .upload(path, imageFile, { upsert: true })
-        if (uploadError) throw uploadError
-        const { data: urlData } = supabase.storage.from('vehicles').getPublicUrl(path)
-        image_url = urlData.publicUrl
+        image_url = await encodeImage(imageFile)
       }
 
       const payload = {
@@ -93,19 +96,21 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
       }
 
       if (isEdit && vehicle?.id) {
-        const { error: upsertError } = await supabase
+        const { error: updateError } = await supabase
           .from('vehicles')
           .update(payload)
           .eq('id', vehicle.id)
-        if (upsertError) throw upsertError
+        if (updateError) throw new Error(updateError.message)
       } else {
-        const { error: insertError } = await supabase.from('vehicles').insert(payload)
-        if (insertError) throw insertError
+        const { error: insertError } = await supabase
+          .from('vehicles')
+          .insert(payload)
+        if (insertError) throw new Error(insertError.message)
       }
 
       onSaved()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Something went wrong')
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSaving(false)
     }
@@ -114,7 +119,8 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
   const deleteVehicle = async () => {
     if (!vehicle?.id) return
     setDeleting(true)
-    await supabase.from('vehicles').delete().eq('id', vehicle.id)
+    const { error: deleteError } = await supabase.from('vehicles').delete().eq('id', vehicle.id)
+    if (deleteError) { setError(deleteError.message); setDeleting(false); return }
     onSaved()
   }
 
@@ -151,7 +157,7 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
                 <div className="relative aspect-[16/7]">
                   <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-black/20 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="text-white text-sm font-medium">Change image</span>
+                    <span className="text-white text-sm font-medium bg-black/50 px-4 py-2 rounded-full">Change image</span>
                   </div>
                 </div>
               ) : (
@@ -191,21 +197,13 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Category</label>
-              <select
-                value={form.cat}
-                onChange={e => set('cat', e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
-              >
+              <select value={form.cat} onChange={e => set('cat', e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white">
                 {CATS.map(c => <option key={c}>{c}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Fuel</label>
-              <select
-                value={form.fuel}
-                onChange={e => set('fuel', e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
-              >
+              <select value={form.fuel} onChange={e => set('fuel', e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white">
                 {FUELS.map(f => <option key={f}>{f}</option>)}
               </select>
             </div>
@@ -215,32 +213,15 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Power</label>
-              <input
-                value={form.power}
-                onChange={e => set('power', e.target.value)}
-                placeholder="502 hp"
-                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 placeholder:text-neutral-300 focus:outline-none focus:border-neutral-400 bg-white"
-              />
+              <input value={form.power} onChange={e => set('power', e.target.value)} placeholder="502 hp" className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 placeholder:text-neutral-300 focus:outline-none focus:border-neutral-400 bg-white" />
             </div>
             <div>
               <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Seats</label>
-              <input
-                type="number"
-                value={form.seats}
-                onChange={e => set('seats', e.target.value)}
-                min={1} max={9}
-                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
-              />
+              <input type="number" value={form.seats} onChange={e => set('seats', e.target.value)} min={1} max={9} className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white" />
             </div>
             <div>
               <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Rate / day (R)</label>
-              <input
-                type="number"
-                value={form.rate}
-                onChange={e => set('rate', e.target.value)}
-                min={0}
-                className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white"
-              />
+              <input type="number" value={form.rate} onChange={e => set('rate', e.target.value)} min={0} className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm text-neutral-900 focus:outline-none focus:border-neutral-400 bg-white" />
             </div>
           </div>
 
@@ -249,10 +230,7 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
             <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Status</label>
             <div className="flex gap-2">
               {STATUSES.map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => set('status', s)}
+                <button key={s} type="button" onClick={() => set('status', s)}
                   className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all border ${
                     form.status === s
                       ? s === 'Available' ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
@@ -260,9 +238,7 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
                         : 'bg-red-50 border-red-200 text-red-600'
                       : 'bg-neutral-50 border-black/[0.08] text-neutral-500 hover:bg-neutral-100'
                   }`}
-                >
-                  {s}
-                </button>
+                >{s}</button>
               ))}
             </div>
           </div>
@@ -280,8 +256,8 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
           </div>
 
           {error && (
-            <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-600">
-              {error}
+            <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-600 break-words">
+              ⚠️ {error}
             </div>
           )}
         </div>
@@ -290,10 +266,7 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
         <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm border-t border-black/[0.06] px-7 py-5 flex items-center justify-between rounded-b-3xl">
           <div>
             {isEdit && !confirmDelete && (
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className="text-sm text-red-400 hover:text-red-600 transition-colors"
-              >
+              <button onClick={() => setConfirmDelete(true)} className="text-sm text-red-400 hover:text-red-600 transition-colors">
                 Delete vehicle
               </button>
             )}
@@ -303,9 +276,7 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
                 <button onClick={deleteVehicle} disabled={deleting} className="text-sm text-red-500 font-medium hover:text-red-700">
                   {deleting ? 'Deleting…' : 'Yes, delete'}
                 </button>
-                <button onClick={() => setConfirmDelete(false)} className="text-sm text-neutral-400 hover:text-neutral-700">
-                  Cancel
-                </button>
+                <button onClick={() => setConfirmDelete(false)} className="text-sm text-neutral-400 hover:text-neutral-700">Cancel</button>
               </div>
             )}
           </div>
@@ -313,10 +284,8 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
             <button onClick={onClose} className="px-5 py-2.5 rounded-full border border-black/[0.1] text-sm text-neutral-600 hover:bg-neutral-50 transition-colors">
               Cancel
             </button>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="px-6 py-2.5 rounded-full bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            <button onClick={save} disabled={saving}
+              className="px-6 py-2.5 rounded-full bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed min-w-[120px] text-center"
             >
               {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add vehicle'}
             </button>
