@@ -1,5 +1,4 @@
 import {
-  buildAbsoluteTelegramProxyUrl,
   closeVehicleForDates,
   getAdminSubscriberChatIds,
   getTelegramBookingById,
@@ -124,6 +123,31 @@ async function sendPhoto(chatId: string, photo: string, caption?: string) {
     photo,
     caption,
   })
+}
+
+async function resolveCustomerBotFileUrl(fileId: string) {
+  if (!TELEGRAM_CUSTOMER_BOT_TOKEN) return null
+
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_CUSTOMER_BOT_TOKEN}/getFile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_id: fileId }),
+  })
+
+  if (!response.ok) return null
+  const payload = await response.json()
+  const filePath = payload?.result?.file_path
+  if (!filePath) return null
+  return `https://api.telegram.org/file/bot${TELEGRAM_CUSTOMER_BOT_TOKEN}/${filePath}`
+}
+
+async function sendPhotoBestEffort(chatId: string, photo: string | null, caption?: string) {
+  if (!photo) return
+  try {
+    await sendPhoto(chatId, photo, caption)
+  } catch (error) {
+    console.error('sendPhotoBestEffort failed', { chatId, caption, error })
+  }
 }
 
 async function answerCallbackQuery(callbackQueryId: string, text?: string) {
@@ -318,10 +342,10 @@ async function sendBookingSummary(chatId: string, booking: TelegramBookingWithCu
 
   await sendMessage(chatId, summary, bookingActionButtons(booking))
 
-  const idUrl = booking.id_file_id ? buildAbsoluteTelegramProxyUrl(booking.id_file_id) : null
-  const licenseUrl = booking.license_file_id ? buildAbsoluteTelegramProxyUrl(booking.license_file_id) : null
-  if (idUrl) await sendPhoto(chatId, idUrl, 'Customer ID / passport')
-  if (licenseUrl) await sendPhoto(chatId, licenseUrl, 'Driver’s license')
+  const idUrl = booking.id_file_id ? await resolveCustomerBotFileUrl(booking.id_file_id) : null
+  const licenseUrl = booking.license_file_id ? await resolveCustomerBotFileUrl(booking.license_file_id) : null
+  await sendPhotoBestEffort(chatId, idUrl, 'Customer ID / passport')
+  await sendPhotoBestEffort(chatId, licenseUrl, 'Driver’s license')
 }
 
 async function handleBookingAction(chatId: string, callbackId: string, bookingId: string, action: 'confirm' | 'paid') {
@@ -612,8 +636,8 @@ export async function notifyAdminNewBooking(input: {
   endDate?: string | null
   totalDays?: number | null
   totalAmount?: number | null
-  idImageUrl?: string | null
-  licenseImageUrl?: string | null
+  idFileId?: string | null
+  licenseFileId?: string | null
 }) {
   const adminChatIds = await getAdminSubscriberChatIds()
   if (adminChatIds.length === 0) return
@@ -645,7 +669,9 @@ export async function notifyAdminNewBooking(input: {
       [{ text: 'Confirm Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
       [{ text: 'Payment Collected', callback_data: `admin:booking_paid:${input.bookingId}` }],
     ])
-    if (input.idImageUrl) await sendPhoto(adminChatId, input.idImageUrl, 'Customer ID / passport')
-    if (input.licenseImageUrl) await sendPhoto(adminChatId, input.licenseImageUrl, 'Driver’s license')
+    const idUrl = input.idFileId ? await resolveCustomerBotFileUrl(input.idFileId) : null
+    const licenseUrl = input.licenseFileId ? await resolveCustomerBotFileUrl(input.licenseFileId) : null
+    await sendPhotoBestEffort(adminChatId, idUrl, 'Customer ID / passport')
+    await sendPhotoBestEffort(adminChatId, licenseUrl, 'Driver’s license')
   }))
 }

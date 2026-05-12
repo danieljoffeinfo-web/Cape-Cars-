@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, type TelegramCatalogVehicle, type VehicleCategory } from '@/lib/telegram-catalog'
-import { buildAbsoluteTelegramProxyUrl, buildTelegramProxyUrl, getAvailableVehiclesForCategory, getVehicleById, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
+import { buildTelegramProxyUrl, getAvailableVehiclesForCategory, getVehicleById, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
 import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
 
 type Locale = 'en' | 'ru'
@@ -163,8 +163,12 @@ const TEXT = {
     ru: 'Спасибо. Теперь отправьте чёткое фото водительского удостоверения.',
   },
   done: {
-    en: 'Perfect. Cape Cars will confirm your booking shortly.',
-    ru: 'Отлично. Cape Cars скоро подтвердит ваше бронирование.',
+    en: (bookingCode: string) => `Perfect. Your booking request ${bookingCode} has been sent to Cape Cars and is now pending confirmation for 24 hours. We’ll confirm it with you shortly.`,
+    ru: (bookingCode: string) => `Отлично. Ваша заявка ${bookingCode} отправлена в Cape Cars и сейчас ожидает подтверждения в течение 24 часов. Мы скоро свяжемся с вами для подтверждения.`,
+  },
+  alreadyCompleted: {
+    en: (bookingCode: string) => `Your booking request ${bookingCode} is already pending with Cape Cars. We’ll confirm it with you shortly. Send /start only if you want to begin a new booking.`,
+    ru: (bookingCode: string) => `Ваша заявка ${bookingCode} уже ожидает подтверждения в Cape Cars. Мы скоро свяжемся с вами. Отправьте /start, только если хотите начать новое бронирование.`,
   },
   restartDate: {
     en: 'No problem. Please send a new starting date.',
@@ -212,6 +216,10 @@ function formatTelegramName(person?: { first_name?: string; last_name?: string }
 
 function t(locale: Locale | null | undefined) {
   return locale === 'ru' ? 'ru' : 'en'
+}
+
+function bookingCode(bookingId?: string | null) {
+  return bookingId ? `CC-${bookingId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'CC-PENDING'
 }
 
 async function getSession(chatId: string): Promise<BotSession> {
@@ -807,10 +815,15 @@ async function handleMessage(message: TelegramMessage) {
 
   if (text) await logInboundText(chatId, text, 'text')
 
-  if (text === '/start' || text.toLowerCase() === 'start' || session.step === 'completed') {
+  if (text === '/start' || text.toLowerCase() === 'start') {
     session = await resetSession(chatId, message.from)
     session = (await ensureCustomer(session)) ?? session
     await sendWelcome(chatId)
+    return
+  }
+
+  if (session.step === 'completed') {
+    await sendMessage(chatId, TEXT.alreadyCompleted[t(session.locale)](bookingCode(session.booking_id)))
     return
   }
 
@@ -966,14 +979,14 @@ async function handleMessage(message: TelegramMessage) {
         endDate: session.requested_end_date ?? null,
         totalDays: session.requested_days ?? null,
         totalAmount: session.total_amount ?? null,
-        idImageUrl: session.id_file_id ? buildAbsoluteTelegramProxyUrl(session.id_file_id) : null,
-        licenseImageUrl: fileId ? buildAbsoluteTelegramProxyUrl(fileId) : null,
+        idFileId: session.id_file_id ?? null,
+        licenseFileId: fileId ?? null,
       })
     } catch (error) {
       console.error('notifyAdminNewBooking failed', error)
     }
 
-    await sendMessage(chatId, TEXT.done[locale])
+    await sendMessage(chatId, TEXT.done[locale](bookingCode(session.booking_id)))
     return
   }
 
