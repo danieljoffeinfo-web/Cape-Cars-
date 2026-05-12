@@ -10,6 +10,7 @@ import {
   openVehicleForBooking,
   pendingHoldExpiresAt,
   registerAdminSubscriber,
+  syncTelegramBookingToRental,
   updateAllVehicleRatesByPercent,
   updateTelegramBookingStatus,
   updateVehicleRate,
@@ -386,6 +387,13 @@ async function handleBookingAction(chatId: string, callbackId: string, bookingId
     const updated = await updateTelegramBookingStatus(bookingId, 'confirmed_booking')
     if (!updated) {
       await answerCallbackQuery(callbackId, 'Could not confirm booking')
+      return
+    }
+
+    const rentalSync = await syncTelegramBookingToRental(bookingId)
+    if (!rentalSync.ok) {
+      await answerCallbackQuery(callbackId, 'Booking saved, website sync failed')
+      await sendMessage(chatId, `Booking status changed, but website booking sync failed: ${rentalSync.error}`)
       return
     }
 

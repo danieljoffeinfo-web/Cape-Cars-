@@ -327,6 +327,64 @@ export async function updateTelegramBookingStatus(bookingId: string, status: str
   }
 }
 
+export async function syncTelegramBookingToRental(bookingId: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return { ok: false as const, error: 'Supabase is not configured' }
+
+  try {
+    const booking = await getTelegramBookingById(bookingId)
+    if (!booking) return { ok: false as const, error: 'Booking not found' }
+    if (!booking.vehicle_name || !booking.start_date || !booking.end_date) {
+      return { ok: false as const, error: 'Booking is missing vehicle or date details' }
+    }
+
+    const email = crmEmail(booking.chat_id)
+    const [{ data: customer, error: customerError }, { data: vehicle, error: vehicleError }] = await Promise.all([
+      supabase.from('customers').select('id').eq('email', email).maybeSingle(),
+      supabase.from('vehicles').select('id, model').eq('model', booking.vehicle_name).maybeSingle(),
+    ])
+
+    if (customerError) return { ok: false as const, error: customerError.message }
+    if (vehicleError) return { ok: false as const, error: vehicleError.message }
+    if (!customer?.id) return { ok: false as const, error: 'Customer profile not found' }
+    if (!vehicle?.id) return { ok: false as const, error: 'Vehicle not found' }
+
+    const notes = `Telegram booking ${booking.id}`
+    const payload = {
+      vehicle_id: vehicle.id,
+      customer_id: customer.id,
+      start_date: booking.start_date,
+      end_date: booking.end_date,
+      status: 'confirmed',
+      notes,
+      final_amount: booking.total_amount ?? 0,
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('rentals')
+      .select('id')
+      .eq('notes', notes)
+      .maybeSingle()
+
+    if (existingError) return { ok: false as const, error: existingError.message }
+
+    if (existing?.id) {
+      const { error: updateError } = await supabase.from('rentals').update(payload).eq('id', existing.id)
+      if (updateError) return { ok: false as const, error: updateError.message }
+    } else {
+      const { error: insertError } = await supabase.from('rentals').insert(payload)
+      if (insertError) return { ok: false as const, error: insertError.message }
+    }
+
+    const { error: vehicleStatusError } = await supabase.from('vehicles').update({ status: 'Booked' }).eq('id', vehicle.id)
+    if (vehicleStatusError) return { ok: false as const, error: vehicleStatusError.message }
+
+    return { ok: true as const, vehicleId: vehicle.id }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 export async function releaseExpiredPendingBookings() {
   const supabase = getAdminClient()
   if (!supabase) return 0
