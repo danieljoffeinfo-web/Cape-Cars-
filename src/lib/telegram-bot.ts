@@ -1,9 +1,12 @@
 import { randomUUID } from 'crypto'
 import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, type TelegramCatalogVehicle, type VehicleCategory } from '@/lib/telegram-catalog'
-import { buildAbsoluteTelegramProxyUrl, buildTelegramProxyUrl, getAvailableVehiclesForCategory, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
+import { buildAbsoluteTelegramProxyUrl, buildTelegramProxyUrl, getAvailableVehiclesForCategory, getVehicleById, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
 import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
 
+type Locale = 'en' | 'ru'
+
 export type SessionStep =
+  | 'choosing_language'
   | 'choosing_category'
   | 'choosing_vehicle'
   | 'awaiting_start_date'
@@ -20,6 +23,7 @@ export type BotSession = {
   booking_id?: string | null
   customer_id?: string | null
   step: SessionStep
+  locale?: Locale | null
   telegram_name?: string | null
   telegram_username?: string | null
   customer_full_name?: string | null
@@ -59,15 +63,130 @@ export type TelegramUpdate = {
 
 type TelegramInlineButton = { text: string; callback_data: string }
 
+type VehicleChoice = {
+  id: string
+  model: string
+  category: VehicleCategory
+  rate: number
+  status: string
+  imageUrl: string
+  source: 'db' | 'static'
+}
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const memorySessions = new Map<string, BotSession>()
+
+const CATEGORY_LABELS: Record<Locale, Record<VehicleCategory, string>> = {
+  en: {
+    'Luxury Vehicles': 'Luxury Vehicles',
+    'Mid Tier Vehicles': 'Mid Tier Vehicles',
+    'Large Vehicles': 'Large Vehicles',
+  },
+  ru: {
+    'Luxury Vehicles': 'Люксовые автомобили',
+    'Mid Tier Vehicles': 'Автомобили среднего класса',
+    'Large Vehicles': 'Большие автомобили',
+  },
+}
+
+const TEXT = {
+  welcome: {
+    en: '🚗 Welcome to Cape Cars Rentals. View our available vehicles below.',
+    ru: '🚗 Добро пожаловать в Cape Cars Rentals. Посмотрите доступные автомобили ниже.',
+  },
+  chooseCategory: {
+    en: 'Choose a vehicle category below.',
+    ru: 'Выберите категорию автомобиля ниже.',
+  },
+  categoryIntro: {
+    en: (category: VehicleCategory, rate?: number | null) => rate ? `${CATEGORY_LABELS.en[category]} — ${formatCurrency(rate)} per day. Choose a vehicle below.` : `${CATEGORY_LABELS.en[category]}. Choose a vehicle below.`,
+    ru: (category: VehicleCategory, rate?: number | null) => rate ? `${CATEGORY_LABELS.ru[category]} — ${formatCurrency(rate)} в день. Выберите автомобиль ниже.` : `${CATEGORY_LABELS.ru[category]}. Выберите автомобиль ниже.`,
+  },
+  chooseVehicle: {
+    en: 'Please choose a vehicle from the category list above.',
+    ru: 'Пожалуйста, выберите автомобиль из списка выше.',
+  },
+  bookingVehicle: {
+    en: (model: string) => `Book ${model}`,
+    ru: (model: string) => `Забронировать ${model}`,
+  },
+  askStartDate: {
+    en: 'What starting date would you like to book the vehicle?',
+    ru: 'С какой даты вы хотите забронировать автомобиль?',
+  },
+  badStartDate: {
+    en: 'Please send the starting date for the booking.',
+    ru: 'Пожалуйста, отправьте дату начала бронирования.',
+  },
+  askDays: {
+    en: (model: string, date: string) => `Great. ${model} is set for ${date}. For how many days would you like to book it?`,
+    ru: (model: string, date: string) => `Отлично. ${model} выбран с ${date}. На сколько дней вы хотите его забронировать?`,
+  },
+  badDays: {
+    en: 'Please send how many days you would like to book for.',
+    ru: 'Пожалуйста, отправьте количество дней для бронирования.',
+  },
+  confirmSummary: {
+    en: (model: string, dailyRate: number, days: number, totalAmount: number, startDate: string, endDate: string) => [
+      `Daily rate on ${model} is ${formatCurrency(dailyRate)}.`,
+      `For ${days} day${days === 1 ? '' : 's'}, your total is ${formatCurrency(totalAmount)}.`,
+      '',
+      `Start date: ${startDate}`,
+      `End date: ${endDate}`,
+      '',
+      'Would you like to confirm, make changes, or view other vehicles?',
+    ].join('\n'),
+    ru: (model: string, dailyRate: number, days: number, totalAmount: number, startDate: string, endDate: string) => [
+      `Дневная ставка на ${model}: ${formatCurrency(dailyRate)}.`,
+      `За ${days} дн. сумма составит ${formatCurrency(totalAmount)}.`,
+      '',
+      `Дата начала: ${startDate}`,
+      `Дата окончания: ${endDate}`,
+      '',
+      'Подтвердить, изменить данные или посмотреть другие автомобили?',
+    ].join('\n'),
+  },
+  fullName: {
+    en: 'Please send your full name and surname.',
+    ru: 'Пожалуйста, отправьте ваше полное имя и фамилию.',
+  },
+  phone: {
+    en: 'Please send your phone number.',
+    ru: 'Пожалуйста, отправьте ваш номер телефона.',
+  },
+  idPassport: {
+    en: 'Please send a clear image of your ID or passport.',
+    ru: 'Пожалуйста, отправьте чёткое фото вашего ID или паспорта.',
+  },
+  license: {
+    en: 'Thanks. Now please send a clear image of the driver’s license.',
+    ru: 'Спасибо. Теперь отправьте чёткое фото водительского удостоверения.',
+  },
+  done: {
+    en: 'Perfect. Cape Cars will confirm your booking shortly.',
+    ru: 'Отлично. Cape Cars скоро подтвердит ваше бронирование.',
+  },
+  restartDate: {
+    en: 'No problem. Please send a new starting date.',
+    ru: 'Без проблем. Пожалуйста, отправьте новую дату начала.',
+  },
+  vehicleNotFound: {
+    en: 'Vehicle not found',
+    ru: 'Автомобиль не найден',
+  },
+  noVehicles: {
+    en: 'There are no available vehicles in this category right now.',
+    ru: 'Сейчас в этой категории нет доступных автомобилей.',
+  },
+} as const
 
 function defaultSession(chatId: string): BotSession {
   return {
     chat_id: chatId,
     booking_id: null,
     customer_id: null,
-    step: 'choosing_category',
+    step: 'choosing_language',
+    locale: null,
     telegram_name: null,
     telegram_username: null,
     customer_full_name: null,
@@ -91,6 +210,10 @@ function formatTelegramName(person?: { first_name?: string; last_name?: string }
   return name || null
 }
 
+function t(locale: Locale | null | undefined) {
+  return locale === 'ru' ? 'ru' : 'en'
+}
+
 async function getSession(chatId: string): Promise<BotSession> {
   return memorySessions.get(chatId) ?? defaultSession(chatId)
 }
@@ -106,9 +229,11 @@ async function saveSession(chatId: string, patch: Partial<BotSession>) {
   return next
 }
 
-async function resetSession(chatId: string, person?: { first_name?: string; last_name?: string; username?: string }) {
+async function resetSession(chatId: string, person?: { first_name?: string; last_name?: string; username?: string }, locale?: Locale | null) {
   return saveSession(chatId, {
     ...defaultSession(chatId),
+    locale: locale ?? null,
+    step: locale ? 'choosing_category' : 'choosing_language',
     telegram_name: formatTelegramName(person),
     telegram_username: person?.username ?? null,
   })
@@ -212,59 +337,110 @@ function formatCurrency(amount: number) {
   return `R ${amount.toLocaleString('en-ZA')}`
 }
 
-function getCategoryButtons() {
-  return CATEGORY_ORDER.map((category) => [{ text: category, callback_data: `category:${category}` }])
+function getLanguageButtons() {
+  return [[
+    { text: 'View vehicles', callback_data: 'lang:en' },
+    { text: 'Посмотреть автомобили', callback_data: 'lang:ru' },
+  ]]
+}
+
+function getCategoryButtons(locale: Locale) {
+  return CATEGORY_ORDER.map((category) => [{ text: CATEGORY_LABELS[locale][category], callback_data: `category:${category}` }])
 }
 
 function vehiclesForCategory(category: VehicleCategory) {
   return TELEGRAM_CATALOG.filter((vehicle) => vehicle.category === category)
 }
 
-function findVehicle(vehicleId: string) {
-  return TELEGRAM_CATALOG.find((vehicle) => vehicle.id === vehicleId) ?? null
+async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static'): Promise<VehicleChoice | null> {
+  if (source === 'db') {
+    const vehicle = await getVehicleById(vehicleId)
+    if (!vehicle) return null
+    return {
+      id: vehicle.id,
+      model: vehicle.model,
+      category: vehicle.cat as VehicleCategory,
+      rate: vehicle.rate,
+      status: vehicle.status,
+      imageUrl: vehicle.image_url || '',
+      source: 'db',
+    }
+  }
+
+  const vehicle = TELEGRAM_CATALOG.find((item) => item.id === vehicleId)
+  if (!vehicle) return null
+  return {
+    id: vehicle.id,
+    model: vehicle.model,
+    category: vehicle.category,
+    rate: vehicle.rate,
+    status: vehicle.status,
+    imageUrl: vehicle.imageUrl,
+    source: 'static',
+  }
 }
 
-function formatVehicleCaption(vehicle: TelegramCatalogVehicle) {
+function formatVehicleCaption(vehicle: VehicleChoice, locale: Locale) {
   return [
     `🚘 ${vehicle.model}`,
-    `${vehicle.category}`,
-    `Daily rate: ${formatCurrency(vehicle.rate)}`,
+    `${CATEGORY_LABELS[locale][vehicle.category]}`,
+    locale === 'ru' ? `Ставка в день: ${formatCurrency(vehicle.rate)}` : `Daily rate: ${formatCurrency(vehicle.rate)}`,
   ].join('\n')
 }
 
 async function sendWelcome(chatId: string) {
   await sendMessage(
     chatId,
-    '🚗 Welcome to Cape Cars Rentals. Please choose a vehicle category below to view our available cars.',
-    getCategoryButtons(),
+    `${TEXT.welcome.en}\n${TEXT.welcome.ru}`,
+    getLanguageButtons(),
   )
 }
 
-async function sendCategoryCatalog(chatId: string, category: VehicleCategory) {
+async function sendCategoryPrompt(chatId: string, locale: Locale) {
+  await sendMessage(chatId, `${TEXT.chooseCategory[locale]}`, getCategoryButtons(locale))
+}
+
+async function sendCategoryCatalog(chatId: string, category: VehicleCategory, locale: Locale) {
   const liveVehicles = await getAvailableVehiclesForCategory(category)
-  const vehicles = (liveVehicles && liveVehicles.length > 0)
-    ? liveVehicles.map((vehicle: any) => ({
-        id: TELEGRAM_CATALOG.find((item) => item.model === vehicle.model)?.id || vehicle.model.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+  const vehicles: VehicleChoice[] = (liveVehicles && liveVehicles.length > 0)
+    ? liveVehicles
+      .filter((vehicle) => vehicle.image_url)
+      .map((vehicle) => ({
+        id: vehicle.id,
         model: vehicle.model,
-        category: vehicle.cat,
+        category: vehicle.cat as VehicleCategory,
         rate: vehicle.rate,
         status: vehicle.status,
-        imageUrl: vehicle.image_url,
+        imageUrl: vehicle.image_url || '',
+        source: 'db' as const,
       }))
-    : vehiclesForCategory(category).filter((vehicle) => vehicle.status === 'Available')
+    : vehiclesForCategory(category)
+      .filter((vehicle) => vehicle.status === 'Available')
+      .map((vehicle) => ({
+        id: vehicle.id,
+        model: vehicle.model,
+        category: vehicle.category,
+        rate: vehicle.rate,
+        status: vehicle.status,
+        imageUrl: vehicle.imageUrl,
+        source: 'static' as const,
+      }))
 
-  const intro = liveVehicles && liveVehicles.length > 0
-    ? `${category}. Choose a vehicle below.`
-    : `${category} — ${formatCurrency(CATEGORY_PRICING[category])} per day. Choose a vehicle below.`
+  if (vehicles.length === 0) {
+    await sendMessage(chatId, TEXT.noVehicles[locale], getCategoryButtons(locale))
+    return
+  }
 
-  await sendMessage(chatId, intro)
+  const introRate = liveVehicles && liveVehicles.length > 0 ? null : CATEGORY_PRICING[category]
+  await sendMessage(chatId, TEXT.categoryIntro[locale](category, introRate))
 
   for (const vehicle of vehicles) {
+    if (!vehicle.imageUrl) continue
     await sendPhoto(
       chatId,
       vehicle.imageUrl,
-      formatVehicleCaption(vehicle),
-      [[{ text: `Book ${vehicle.model}`, callback_data: `book:${vehicle.id}` }]],
+      formatVehicleCaption(vehicle, locale),
+      [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
     )
   }
 }
@@ -273,17 +449,57 @@ function toIsoDate(date: Date) {
   return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())).toISOString().slice(0, 10)
 }
 
-function nextWeekday(targetDay: number) {
+function nextWeekday(targetDay: number, allowSameDay = false) {
   const now = new Date()
   const date = new Date(now)
-  const diff = (targetDay - now.getDay() + 7) % 7 || 7
+  let diff = (targetDay - now.getDay() + 7) % 7
+  if (!allowSameDay && diff === 0) diff = 7
   date.setDate(now.getDate() + diff)
   return toIsoDate(date)
 }
 
 function parseDate(text: string) {
-  const value = text.trim().toLowerCase().replace(/,/g, ' ')
-  if (!value) return null
+  const original = text.trim().toLowerCase().replace(/,/g, ' ')
+  if (!original) return null
+
+  let value = original
+    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/g, '$1')
+    .replace(/\bof\b/g, ' ')
+    .replace(/\bна\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const replacements: Record<string, string> = {
+    'понедельник': 'monday',
+    'вторник': 'tuesday',
+    'среда': 'wednesday',
+    'четверг': 'thursday',
+    'пятница': 'friday',
+    'суббота': 'saturday',
+    'воскресенье': 'sunday',
+    'следующий ': 'next ',
+    'следующую ': 'next ',
+    'эта ': 'this ',
+    'этот ': 'this ',
+    'сегодня': 'today',
+    'завтра': 'tomorrow',
+    'января': 'january',
+    'февраля': 'february',
+    'марта': 'march',
+    'апреля': 'april',
+    'мая': 'may',
+    'июня': 'june',
+    'июля': 'july',
+    'августа': 'august',
+    'сентября': 'september',
+    'октября': 'october',
+    'ноября': 'november',
+    'декабря': 'december',
+  }
+
+  for (const [from, to] of Object.entries(replacements)) {
+    value = value.replaceAll(from, to)
+  }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const date = new Date(`${value}T00:00:00Z`)
@@ -308,13 +524,7 @@ function parseDate(text: string) {
   }
   if (value.startsWith('this ')) {
     const day = value.replace('this ', '').trim()
-    if (day in weekdays) {
-      const now = new Date()
-      const date = new Date(now)
-      const diff = (weekdays[day] - now.getDay() + 7) % 7
-      date.setDate(now.getDate() + diff)
-      return toIsoDate(date)
-    }
+    if (day in weekdays) return nextWeekday(weekdays[day], true)
   }
 
   const slashMatch = value.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/)
@@ -325,14 +535,19 @@ function parseDate(text: string) {
     return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
   }
 
-  const cleaned = value
-    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/g, '$1')
-    .replace(/\bof\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  if (/^\d{1,2}$/.test(value)) {
+    const today = new Date()
+    const day = Number(value)
+    let candidate = new Date(today.getFullYear(), today.getMonth(), day)
+    const floorToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    if (candidate.getDate() !== day || candidate < floorToday) {
+      candidate = new Date(today.getFullYear(), today.getMonth() + 1, day)
+    }
+    return Number.isNaN(candidate.getTime()) ? null : toIsoDate(candidate)
+  }
 
   const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december']
-  const directDayMonth = cleaned.match(/^(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?$/)
+  const directDayMonth = value.match(/^(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?$/)
   if (directDayMonth && monthNames.includes(directDayMonth[2])) {
     const day = Number(directDayMonth[1])
     const month = monthNames.indexOf(directDayMonth[2])
@@ -341,7 +556,7 @@ function parseDate(text: string) {
     return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
   }
 
-  const directMonthDay = cleaned.match(/^([a-z]+)\s+(\d{1,2})(?:\s+(\d{4}))?$/)
+  const directMonthDay = value.match(/^([a-z]+)\s+(\d{1,2})(?:\s+(\d{4}))?$/)
   if (directMonthDay && monthNames.includes(directMonthDay[1])) {
     const month = monthNames.indexOf(directMonthDay[1])
     const day = Number(directMonthDay[2])
@@ -350,14 +565,42 @@ function parseDate(text: string) {
     return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
   }
 
-  const natural = new Date(cleaned)
+  const natural = new Date(value)
   if (!Number.isNaN(natural.getTime())) return toIsoDate(natural)
   return null
 }
 
 function parseRentalDays(text: string) {
-  const value = text.trim().toLowerCase()
-  if (!value) return null
+  const raw = text.trim().toLowerCase()
+  if (!raw) return null
+
+  let value = raw
+  const replacements: Record<string, string> = {
+    'одна': 'one',
+    'один': 'one',
+    'два': 'two',
+    'три': 'three',
+    'четыре': 'four',
+    'пять': 'five',
+    'шесть': 'six',
+    'семь': 'seven',
+    'восемь': 'eight',
+    'девять': 'nine',
+    'десять': 'ten',
+    'одиннадцать': 'eleven',
+    'двенадцать': 'twelve',
+    'тринадцать': 'thirteen',
+    'четырнадцать': 'fourteen',
+    'неделя': 'week',
+    'недели': 'weeks',
+    'недель': 'weeks',
+    'день': 'day',
+    'дня': 'days',
+    'дней': 'days',
+  }
+  for (const [from, to] of Object.entries(replacements)) {
+    value = value.replaceAll(from, to)
+  }
 
   const wordNumbers: Record<string, number> = {
     one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
@@ -414,12 +657,12 @@ async function handleCategorySelect(callback: CallbackQuery, category: VehicleCa
   const chatId = String(callback.message?.chat.id ?? '')
   if (!chatId) return
 
+  const session = await getSession(chatId)
+  const locale = t(session.locale)
   await logInboundText(chatId, `Selected category: ${category}`, 'button')
 
   await saveSession(chatId, {
     step: 'choosing_vehicle',
-    telegram_name: formatTelegramName(callback.from),
-    telegram_username: callback.from?.username ?? null,
     selected_category: category,
     selected_vehicle_id: null,
     selected_vehicle_model: null,
@@ -432,17 +675,19 @@ async function handleCategorySelect(callback: CallbackQuery, category: VehicleCa
     license_file_id: null,
   })
 
-  await answerCallbackQuery(callback.id, category)
-  await sendCategoryCatalog(chatId, category)
+  await answerCallbackQuery(callback.id, CATEGORY_LABELS[locale][category])
+  await sendCategoryCatalog(chatId, category, locale)
 }
 
-async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string) {
+async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, source: 'db' | 'static') {
   const chatId = String(callback.message?.chat.id ?? '')
   if (!chatId) return
 
-  const vehicle = findVehicle(vehicleId)
+  const session = await getSession(chatId)
+  const locale = t(session.locale)
+  const vehicle = await resolveVehicleChoice(vehicleId, source)
   if (!vehicle) {
-    await answerCallbackQuery(callback.id, 'Vehicle not found')
+    await answerCallbackQuery(callback.id, TEXT.vehicleNotFound[locale])
     await sendWelcome(chatId)
     return
   }
@@ -472,9 +717,9 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string) {
   next = (await ensureCustomer(next)) ?? next
   await persistBooking(next, 'draft')
 
-  await answerCallbackQuery(callback.id, `Book ${vehicle.model}`)
-  await sendMessage(chatId, `Book ${vehicle.model}`)
-  await sendMessage(chatId, 'What day would you like to book the vehicle?')
+  await answerCallbackQuery(callback.id, TEXT.bookingVehicle[locale](vehicle.model))
+  await sendMessage(chatId, TEXT.bookingVehicle[locale](vehicle.model))
+  await sendMessage(chatId, TEXT.askStartDate[locale])
 }
 
 async function handleCallback(callback: CallbackQuery) {
@@ -482,22 +727,39 @@ async function handleCallback(callback: CallbackQuery) {
   const chatId = String(callback.message?.chat.id ?? '')
   if (!chatId) return
 
+  if (data.startsWith('lang:')) {
+    const locale = data.replace('lang:', '') as Locale
+    let session = await resetSession(chatId, callback.from, locale)
+    session = (await ensureCustomer(session)) ?? session
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Русский' : 'English')
+    await sendCategoryPrompt(chatId, locale)
+    return
+  }
+
   if (data.startsWith('category:')) {
     await handleCategorySelect(callback, data.replace('category:', '') as VehicleCategory)
     return
   }
 
-  if (data.startsWith('book:')) {
-    await handleVehicleSelect(callback, data.replace('book:', ''))
+  if (data.startsWith('bookdb:')) {
+    await handleVehicleSelect(callback, data.replace('bookdb:', ''), 'db')
     return
   }
+
+  if (data.startsWith('book:')) {
+    await handleVehicleSelect(callback, data.replace('book:', ''), 'static')
+    return
+  }
+
+  const session = await getSession(chatId)
+  const locale = t(session.locale)
 
   if (data === 'confirm_booking') {
     await logInboundText(chatId, 'Confirmed booking', 'button')
     const next = await saveSession(chatId, { step: 'awaiting_full_name' })
     await persistBooking(next, 'customer_details_pending')
-    await answerCallbackQuery(callback.id, 'Confirmed')
-    await sendMessage(chatId, 'Please send your full name and surname.')
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Подтверждено' : 'Confirmed')
+    await sendMessage(chatId, TEXT.fullName[locale])
     return
   }
 
@@ -510,8 +772,31 @@ async function handleCallback(callback: CallbackQuery) {
       requested_end_date: null,
       total_amount: null,
     })
-    await answerCallbackQuery(callback.id, 'Make changes')
-    await sendMessage(chatId, 'No problem. Please send a new booking date.')
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Изменить' : 'Make changes')
+    await sendMessage(chatId, TEXT.restartDate[locale])
+    return
+  }
+
+  if (data === 'view_other_vehicles') {
+    await logInboundText(chatId, 'View other vehicles', 'button')
+    await saveSession(chatId, {
+      step: 'choosing_category',
+      booking_id: null,
+      requested_start_date: null,
+      requested_days: null,
+      requested_end_date: null,
+      total_amount: null,
+      selected_vehicle_id: null,
+      selected_vehicle_model: null,
+      selected_category: null,
+      daily_rate: null,
+      customer_full_name: null,
+      customer_phone: null,
+      id_file_id: null,
+      license_file_id: null,
+    })
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Другие автомобили' : 'Other vehicles')
+    await sendCategoryPrompt(chatId, locale)
   }
 }
 
@@ -529,20 +814,27 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
-  if (session.step === 'choosing_category') {
+  const locale = t(session.locale)
+
+  if (session.step === 'choosing_language' || !session.locale) {
     await sendWelcome(chatId)
     return
   }
 
+  if (session.step === 'choosing_category') {
+    await sendCategoryPrompt(chatId, locale)
+    return
+  }
+
   if (session.step === 'choosing_vehicle') {
-    await sendMessage(chatId, 'Please choose a vehicle from the category list above.')
+    await sendMessage(chatId, TEXT.chooseVehicle[locale])
     return
   }
 
   if (session.step === 'awaiting_start_date') {
     const startDate = parseDate(text)
     if (!startDate) {
-      await sendMessage(chatId, 'Please send the booking date.')
+      await sendMessage(chatId, TEXT.badStartDate[locale])
       return
     }
 
@@ -553,14 +845,14 @@ async function handleMessage(message: TelegramMessage) {
       telegram_username: message.from?.username ?? null,
     })
     await persistBooking(session, 'draft')
-    await sendMessage(chatId, `Great. ${session.selected_vehicle_model} is set for ${startDate}. How many days would you like to book it for?`)
+    await sendMessage(chatId, TEXT.askDays[locale](session.selected_vehicle_model || 'Vehicle', startDate))
     return
   }
 
   if (session.step === 'awaiting_days') {
     const days = parseRentalDays(text)
     if (!days) {
-      await sendMessage(chatId, 'Please send how many days you would like to book for.')
+      await sendMessage(chatId, TEXT.badDays[locale])
       return
     }
 
@@ -577,26 +869,19 @@ async function handleMessage(message: TelegramMessage) {
 
     await sendMessage(
       chatId,
+      TEXT.confirmSummary[locale](session.selected_vehicle_model || 'Vehicle', session.daily_rate ?? 0, days, totalAmount, session.requested_start_date || '', endDate),
       [
-        `Daily rate on ${session.selected_vehicle_model} is ${formatCurrency(session.daily_rate ?? 0)}.`,
-        `For ${days} day${days === 1 ? '' : 's'}, your total is ${formatCurrency(totalAmount)}.`,
-        '',
-        `Start date: ${session.requested_start_date}`,
-        `End date: ${endDate}`,
-        '',
-        'Would you like to confirm or make changes?',
-      ].join('\n'),
-      [[
-        { text: 'Confirm', callback_data: 'confirm_booking' },
-        { text: 'Make changes', callback_data: 'change_booking' },
-      ]],
+        [{ text: locale === 'ru' ? 'Подтвердить' : 'Confirm', callback_data: 'confirm_booking' }],
+        [{ text: locale === 'ru' ? 'Изменить' : 'Make changes', callback_data: 'change_booking' }],
+        [{ text: locale === 'ru' ? 'Другие автомобили' : 'View other vehicles', callback_data: 'view_other_vehicles' }],
+      ],
     )
     return
   }
 
   if (session.step === 'awaiting_full_name') {
     if (!text || text.length < 3 || !text.includes(' ')) {
-      await sendMessage(chatId, 'Please send your full name and surname.')
+      await sendMessage(chatId, TEXT.fullName[locale])
       return
     }
 
@@ -606,13 +891,13 @@ async function handleMessage(message: TelegramMessage) {
     })
     session = (await ensureCustomer(session)) ?? session
     await persistBooking(session, 'customer_details_pending')
-    await sendMessage(chatId, 'Please send your phone number.')
+    await sendMessage(chatId, TEXT.phone[locale])
     return
   }
 
   if (session.step === 'awaiting_phone') {
     if (!text || text.replace(/\D/g, '').length < 7) {
-      await sendMessage(chatId, 'Please send your phone number.')
+      await sendMessage(chatId, TEXT.phone[locale])
       return
     }
 
@@ -622,14 +907,14 @@ async function handleMessage(message: TelegramMessage) {
     })
     session = (await ensureCustomer(session)) ?? session
     await persistBooking(session, 'documents_pending')
-    await sendMessage(chatId, 'Please send a clear image of your ID or passport.')
+    await sendMessage(chatId, TEXT.idPassport[locale])
     return
   }
 
   if (session.step === 'awaiting_id_image') {
     const fileId = extractFileId(message)
     if (!fileId) {
-      await sendMessage(chatId, 'Please send a clear image of your ID or passport.')
+      await sendMessage(chatId, TEXT.idPassport[locale])
       return
     }
 
@@ -644,14 +929,14 @@ async function handleMessage(message: TelegramMessage) {
 
     session = await saveSession(chatId, { step: 'awaiting_license_image', id_file_id: fileId })
     await persistBooking(session, 'documents_pending')
-    await sendMessage(chatId, 'Thanks. Now please send a clear image of the driver’s license.')
+    await sendMessage(chatId, TEXT.license[locale])
     return
   }
 
   if (session.step === 'awaiting_license_image') {
     const fileId = extractFileId(message)
     if (!fileId) {
-      await sendMessage(chatId, 'Please send a clear image of the driver’s license.')
+      await sendMessage(chatId, TEXT.license[locale])
       return
     }
 
@@ -666,7 +951,7 @@ async function handleMessage(message: TelegramMessage) {
 
     session = await saveSession(chatId, { step: 'completed', license_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
-    await persistBooking(session, 'pre_confirmation')
+    await persistBooking(session, 'pending')
 
     try {
       await notifyAdminNewBooking({
@@ -688,13 +973,13 @@ async function handleMessage(message: TelegramMessage) {
       console.error('notifyAdminNewBooking failed', error)
     }
 
-    await sendMessage(chatId, 'Perfect. Cape Cars will confirm your booking shortly.')
+    await sendMessage(chatId, TEXT.done[locale])
     return
   }
 
-  session = await resetSession(chatId, message.from)
+  session = await resetSession(chatId, message.from, session.locale)
   session = (await ensureCustomer(session)) ?? session
-  await sendWelcome(chatId)
+  await sendCategoryPrompt(chatId, t(session.locale))
 }
 
 export async function processTelegramUpdate(update: TelegramUpdate) {

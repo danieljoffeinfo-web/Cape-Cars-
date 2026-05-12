@@ -5,6 +5,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const FALLBACK_PUBLIC_BASE_URL = 'https://atturo-nextjs.vercel.app'
 const ADMIN_REGISTER_BODY = 'ADMIN_SUBSCRIBER_REGISTER'
+const HOLD_WINDOW_HOURS = 24
 
 export type TelegramCustomerUpsert = {
   chatId: string
@@ -96,12 +97,26 @@ function publicBaseUrl() {
   return fromEnv.startsWith('http') ? fromEnv : `https://${fromEnv}`
 }
 
+function hoursSince(value: string) {
+  return (Date.now() - new Date(value).getTime()) / (1000 * 60 * 60)
+}
+
+function bookingHoldIsActive(booking: { status: string, created_at: string }) {
+  if (['confirmed_booking', 'confirmed', 'payment_collected'].includes(booking.status)) return true
+  if (['pending', 'pre_confirmation'].includes(booking.status)) return hoursSince(booking.created_at) <= HOLD_WINDOW_HOURS
+  return false
+}
+
 export function buildTelegramProxyUrl(fileId: string) {
   return `/api/telegram/file/${encodeURIComponent(fileId)}`
 }
 
 export function buildAbsoluteTelegramProxyUrl(fileId: string) {
   return `${publicBaseUrl()}${buildTelegramProxyUrl(fileId)}`
+}
+
+export function pendingHoldExpiresAt(createdAt: string) {
+  return new Date(new Date(createdAt).getTime() + HOLD_WINDOW_HOURS * 60 * 60 * 1000).toISOString()
 }
 
 export async function upsertTelegramCustomer(input: TelegramCustomerUpsert) {
@@ -139,10 +154,7 @@ export async function upsertTelegramCustomer(input: TelegramCustomerUpsert) {
         drivers_license_number: input.licenseUrl ?? null,
       }, { onConflict: 'email' })
 
-    if (crmError) {
-      console.error('upsert CRM customer failed', crmError)
-    }
-
+    if (crmError) console.error('upsert CRM customer failed', crmError)
     return data
   } catch (error) {
     console.error('upsertTelegramCustomer exception', error)
@@ -217,24 +229,88 @@ export async function upsertTelegramBooking(input: TelegramBookingUpsert) {
   }
 }
 
-export async function getAvailableVehiclesForCategory(category: string) {
+export async function getTelegramBookingById(bookingId: string) {
   const supabase = getAdminClient()
   if (!supabase) return null
 
   try {
     const { data, error } = await supabase
-      .from('vehicles')
-      .select('id, model, cat, rate, status, image_url, color, fuel, seats')
-      .eq('cat', category)
-      .eq('status', 'Available')
-      .order('sort_order', { ascending: true })
+      .from('telegram_bookings')
+      .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
+      .eq('id', bookingId)
+      .maybeSingle()
 
     if (error) {
-      console.error('getAvailableVehiclesForCategory failed', error)
+      console.error('getTelegramBookingById failed', error)
       return null
     }
 
-    return data as VehicleRow[]
+    return (data ?? null) as TelegramBookingWithCustomer | null
+  } catch (error) {
+    console.error('getTelegramBookingById exception', error)
+    return null
+  }
+}
+
+export async function updateTelegramBookingStatus(bookingId: string, status: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return null
+
+  try {
+    const { data, error } = await supabase
+      .from('telegram_bookings')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', bookingId)
+      .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
+      .single()
+
+    if (error) {
+      console.error('updateTelegramBookingStatus failed', error)
+      return null
+    }
+
+    return data as TelegramBookingWithCustomer
+  } catch (error) {
+    console.error('updateTelegramBookingStatus exception', error)
+    return null
+  }
+}
+
+export async function getAvailableVehiclesForCategory(category: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return null
+
+  try {
+    const [{ data: vehicles, error: vehiclesError }, { data: bookings, error: bookingsError }] = await Promise.all([
+      supabase
+        .from('vehicles')
+        .select('id, model, cat, rate, status, image_url, color, fuel, seats')
+        .eq('cat', category)
+        .eq('status', 'Available')
+        .order('sort_order', { ascending: true }),
+      supabase
+        .from('telegram_bookings')
+        .select('vehicle_name, status, created_at')
+        .eq('vehicle_category', category)
+        .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected']),
+    ])
+
+    if (vehiclesError) {
+      console.error('getAvailableVehiclesForCategory vehicles failed', vehiclesError)
+      return null
+    }
+    if (bookingsError) {
+      console.error('getAvailableVehiclesForCategory bookings failed', bookingsError)
+      return null
+    }
+
+    const blockedModels = new Set(
+      ((bookings ?? []) as { vehicle_name: string | null, status: string, created_at: string }[])
+        .filter((booking) => booking.vehicle_name && bookingHoldIsActive(booking))
+        .map((booking) => booking.vehicle_name as string),
+    )
+
+    return ((vehicles ?? []) as VehicleRow[]).filter((vehicle) => !blockedModels.has(vehicle.model))
   } catch (error) {
     console.error('getAvailableVehiclesForCategory exception', error)
     return null
@@ -287,7 +363,7 @@ export async function getVehicleById(vehicleId: string) {
   }
 }
 
-export async function markVehicleBooked(vehicleId: string, startDate: string, endDate: string) {
+export async function closeVehicleForDates(vehicleId: string, startDate: string, endDate: string) {
   const supabase = getAdminClient()
   if (!supabase) return { ok: false as const, error: 'Supabase is not configured' }
 
@@ -295,26 +371,44 @@ export async function markVehicleBooked(vehicleId: string, startDate: string, en
     const vehicle = await getVehicleById(vehicleId)
     if (!vehicle) return { ok: false as const, error: 'Vehicle not found' }
 
-    const { error: vehicleError } = await supabase
-      .from('vehicles')
-      .update({ status: 'Booked' })
-      .eq('id', vehicleId)
-
+    const { error: vehicleError } = await supabase.from('vehicles').update({ status: 'Booked' }).eq('id', vehicleId)
     if (vehicleError) return { ok: false as const, error: vehicleError.message }
 
-    const { error: rentalError } = await supabase
-      .from('rentals')
-      .insert({
-        vehicle_id: vehicleId,
-        customer_id: null,
-        start_date: startDate,
-        end_date: endDate,
-        status: 'confirmed',
-        notes: `Admin blockout via Telegram (${startDate} → ${endDate})`,
-        final_amount: 0,
-      })
+    const { error: rentalError } = await supabase.from('rentals').insert({
+      vehicle_id: vehicleId,
+      customer_id: null,
+      start_date: startDate,
+      end_date: endDate,
+      status: 'confirmed',
+      notes: `Admin closeout via Telegram (${startDate} → ${endDate})`,
+      final_amount: 0,
+    })
 
     if (rentalError) return { ok: false as const, error: rentalError.message }
+    return { ok: true as const, vehicle }
+  } catch (error) {
+    return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+export async function openVehicleForBooking(vehicleId: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return { ok: false as const, error: 'Supabase is not configured' }
+
+  try {
+    const vehicle = await getVehicleById(vehicleId)
+    if (!vehicle) return { ok: false as const, error: 'Vehicle not found' }
+
+    const { error: vehicleError } = await supabase.from('vehicles').update({ status: 'Available' }).eq('id', vehicleId)
+    if (vehicleError) return { ok: false as const, error: vehicleError.message }
+
+    await supabase
+      .from('rentals')
+      .update({ status: 'cancelled', notes: 'Admin closeout released via Telegram' })
+      .eq('vehicle_id', vehicleId)
+      .is('customer_id', null)
+      .ilike('notes', 'Admin closeout via Telegram%')
+      .in('status', ['pending', 'confirmed'])
 
     return { ok: true as const, vehicle }
   } catch (error) {
@@ -354,10 +448,11 @@ export async function updateAllVehicleRatesByPercent(percent: number) {
     if (error) return { ok: false as const, error: error.message }
 
     const vehicles = (data ?? []) as VehicleRow[]
-    await Promise.all(vehicles.map((vehicle) => {
+    const updates = vehicles.map((vehicle) => {
       const nextRate = Math.max(0, Math.round(vehicle.rate * (1 + (percent / 100))))
       return supabase.from('vehicles').update({ rate: nextRate }).eq('id', vehicle.id)
-    }))
+    })
+    await Promise.all(updates)
 
     return { ok: true as const, count: vehicles.length }
   } catch (error) {

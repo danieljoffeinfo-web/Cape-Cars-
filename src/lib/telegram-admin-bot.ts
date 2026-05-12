@@ -1,24 +1,29 @@
 import {
+  buildAbsoluteTelegramProxyUrl,
+  closeVehicleForDates,
   getAdminSubscriberChatIds,
+  getTelegramBookingById,
   getTelegramBookingsForRange,
   getVehicleById,
   getVehiclesForCategory,
-  markVehicleBooked,
+  openVehicleForBooking,
+  pendingHoldExpiresAt,
   registerAdminSubscriber,
   updateAllVehicleRatesByPercent,
+  updateTelegramBookingStatus,
   updateVehicleRate,
   type TelegramBookingWithCustomer,
 } from '@/lib/telegram-admin'
 import { CATEGORY_ORDER, type VehicleCategory } from '@/lib/telegram-catalog'
 
 const TELEGRAM_ADMIN_BOT_TOKEN = process.env.TELEGRAM_ADMIN_BOT_TOKEN
+const TELEGRAM_CUSTOMER_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 
 type AdminStep =
   | 'home'
   | 'awaiting_vehicle_category'
   | 'awaiting_vehicle_selection'
   | 'awaiting_vehicle_dates'
-  | 'awaiting_pricing_mode'
   | 'awaiting_pricing_category'
   | 'awaiting_pricing_vehicle'
   | 'awaiting_single_price'
@@ -45,18 +50,20 @@ export type TelegramUpdate = {
 
 type InlineButton = { text: string; callback_data?: string; url?: string }
 
+type VehicleAction = 'open' | 'close'
+
 type AdminSession = {
   chatId: string
   step: AdminStep
-  mode?: 'vehicle_manager' | 'pricing_single' | null
   selectedCategory?: VehicleCategory | null
   selectedVehicleId?: string | null
+  vehicleAction?: VehicleAction | null
 }
 
 const sessions = new Map<string, AdminSession>()
 
 function getSession(chatId: string): AdminSession {
-  return sessions.get(chatId) ?? { chatId, step: 'home', mode: null, selectedCategory: null, selectedVehicleId: null }
+  return sessions.get(chatId) ?? { chatId, step: 'home', selectedCategory: null, selectedVehicleId: null, vehicleAction: null }
 }
 
 function saveSession(chatId: string, patch: Partial<AdminSession>) {
@@ -69,7 +76,7 @@ function fullName(person?: { first_name?: string; last_name?: string }) {
   return [person?.first_name, person?.last_name].filter(Boolean).join(' ').trim() || null
 }
 
-async function telegramApi(method: string, payload: Record<string, unknown>) {
+async function adminTelegramApi(method: string, payload: Record<string, unknown>) {
   if (!TELEGRAM_ADMIN_BOT_TOKEN) throw new Error('Missing TELEGRAM_ADMIN_BOT_TOKEN')
 
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_ADMIN_BOT_TOKEN}/${method}`, {
@@ -86,8 +93,25 @@ async function telegramApi(method: string, payload: Record<string, unknown>) {
   return response.json()
 }
 
+async function customerTelegramApi(method: string, payload: Record<string, unknown>) {
+  if (!TELEGRAM_CUSTOMER_BOT_TOKEN) throw new Error('Missing TELEGRAM_BOT_TOKEN')
+
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_CUSTOMER_BOT_TOKEN}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Customer Telegram API ${method} failed: ${response.status} ${text}`)
+  }
+
+  return response.json()
+}
+
 async function sendMessage(chatId: string, text: string, buttons?: InlineButton[][]) {
-  return telegramApi('sendMessage', {
+  return adminTelegramApi('sendMessage', {
     chat_id: chatId,
     text,
     reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
@@ -95,7 +119,7 @@ async function sendMessage(chatId: string, text: string, buttons?: InlineButton[
 }
 
 async function sendPhoto(chatId: string, photo: string, caption?: string) {
-  return telegramApi('sendPhoto', {
+  return adminTelegramApi('sendPhoto', {
     chat_id: chatId,
     photo,
     caption,
@@ -103,7 +127,7 @@ async function sendPhoto(chatId: string, photo: string, caption?: string) {
 }
 
 async function answerCallbackQuery(callbackQueryId: string, text?: string) {
-  return telegramApi('answerCallbackQuery', {
+  return adminTelegramApi('answerCallbackQuery', {
     callback_query_id: callbackQueryId,
     text,
   })
@@ -179,21 +203,23 @@ function parseDate(text: string) {
     .replace(/\s+/g, ' ')
     .trim()
 
+  if (/^\d{1,2}$/.test(cleaned)) {
+    const today = new Date()
+    let year = today.getFullYear()
+    let month = today.getMonth()
+    let candidate = new Date(year, month, Number(cleaned))
+    if (candidate.getDate() !== Number(cleaned) || candidate < new Date(today.getFullYear(), today.getMonth(), today.getDate())) {
+      candidate = new Date(year, month + 1, Number(cleaned))
+    }
+    return Number.isNaN(candidate.getTime()) ? null : toIsoDate(candidate)
+  }
+
   const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december']
   const directDayMonth = cleaned.match(/^(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?$/)
   if (directDayMonth && monthNames.includes(directDayMonth[2])) {
     const day = Number(directDayMonth[1])
     const month = monthNames.indexOf(directDayMonth[2])
     const year = directDayMonth[3] ? Number(directDayMonth[3]) : new Date().getFullYear()
-    const date = new Date(year, month, day)
-    return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
-  }
-
-  const directMonthDay = cleaned.match(/^([a-z]+)\s+(\d{1,2})(?:\s+(\d{4}))?$/)
-  if (directMonthDay && monthNames.includes(directMonthDay[1])) {
-    const month = monthNames.indexOf(directMonthDay[1])
-    const day = Number(directMonthDay[2])
-    const year = directMonthDay[3] ? Number(directMonthDay[3]) : new Date().getFullYear()
     const date = new Date(year, month, day)
     return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
   }
@@ -246,8 +272,92 @@ function customerShape(booking: TelegramBookingWithCustomer) {
 }
 
 async function sendMainMenu(chatId: string, text = 'Cape Cars admin bot is ready. Choose what you want to manage.') {
-  saveSession(chatId, { step: 'home', mode: null, selectedCategory: null, selectedVehicleId: null })
+  saveSession(chatId, { step: 'home', selectedCategory: null, selectedVehicleId: null, vehicleAction: null })
   await sendMessage(chatId, text, menuButtons())
+}
+
+async function sendCustomerBookingConfirmed(chatId: string) {
+  await customerTelegramApi('sendMessage', {
+    chat_id: chatId,
+    text: 'Your booking has been confirmed. We will confirm payment with you shortly.',
+  })
+}
+
+function customerChatUrl(chatId: string, username?: string | null) {
+  if (username) return `https://t.me/${username}`
+  return `tg://user?id=${chatId}`
+}
+
+function bookingActionButtons(booking: TelegramBookingWithCustomer) {
+  const customer = customerShape(booking)
+  return [
+    [{ text: 'Collect Payment', url: customerChatUrl(booking.chat_id, customer?.telegram_username || null) }],
+    [{ text: 'Confirm Booking', callback_data: `admin:booking_confirm:${booking.id}` }],
+    [{ text: 'Payment Collected', callback_data: `admin:booking_paid:${booking.id}` }],
+  ]
+}
+
+async function sendBookingSummary(chatId: string, booking: TelegramBookingWithCustomer, heading = 'New booking') {
+  const customer = customerShape(booking)
+  const holdUntil = pendingHoldExpiresAt(booking.created_at)
+  const summary = [
+    heading,
+    '',
+    `Code: ${bookingCode(booking.id)}`,
+    `Customer: ${customer?.full_name || customer?.telegram_name || booking.chat_id}`,
+    `Phone: ${customer?.phone || 'No phone yet'}`,
+    `Customer Telegram ID: ${booking.chat_id}`,
+    `Vehicle: ${booking.vehicle_name || 'Vehicle pending'}`,
+    `Category: ${booking.vehicle_category || 'Category pending'}`,
+    `Dates: ${booking.start_date || 'No start date'} → ${booking.end_date || 'No end date'}`,
+    `Days: ${booking.total_days || 0}`,
+    `Total: ${booking.total_amount ? money(booking.total_amount) : 'No total yet'}`,
+    `Status: ${booking.status}`,
+    `Pending hold until: ${new Date(holdUntil).toLocaleString('en-ZA')}`,
+  ].join('\n')
+
+  await sendMessage(chatId, summary, bookingActionButtons(booking))
+
+  const idUrl = booking.id_file_id ? buildAbsoluteTelegramProxyUrl(booking.id_file_id) : null
+  const licenseUrl = booking.license_file_id ? buildAbsoluteTelegramProxyUrl(booking.license_file_id) : null
+  if (idUrl) await sendPhoto(chatId, idUrl, 'Customer ID / passport')
+  if (licenseUrl) await sendPhoto(chatId, licenseUrl, 'Driver’s license')
+}
+
+async function handleBookingAction(chatId: string, callbackId: string, bookingId: string, action: 'confirm' | 'paid') {
+  const booking = await getTelegramBookingById(bookingId)
+  if (!booking) {
+    await answerCallbackQuery(callbackId, 'Booking not found')
+    await sendMessage(chatId, 'That booking could not be found anymore.')
+    return
+  }
+
+  if (action === 'confirm') {
+    const updated = await updateTelegramBookingStatus(bookingId, 'confirmed_booking')
+    if (!updated) {
+      await answerCallbackQuery(callbackId, 'Could not confirm booking')
+      return
+    }
+
+    try {
+      await sendCustomerBookingConfirmed(updated.chat_id)
+    } catch (error) {
+      console.error('sendCustomerBookingConfirmed failed', error)
+    }
+
+    await answerCallbackQuery(callbackId, 'Booking confirmed')
+    await sendBookingSummary(chatId, updated, 'Booking confirmed')
+    return
+  }
+
+  const updated = await updateTelegramBookingStatus(bookingId, 'confirmed')
+  await answerCallbackQuery(callbackId, 'Payment collected')
+  if (!updated) {
+    await sendMessage(chatId, 'Payment was marked collected but the booking record did not update cleanly.')
+    return
+  }
+
+  await sendBookingSummary(chatId, updated, 'Payment collected')
 }
 
 async function handleCallback(callback: CallbackQuery) {
@@ -262,14 +372,13 @@ async function handleCallback(callback: CallbackQuery) {
   }
 
   if (data === 'admin:vehicle_manager') {
-    saveSession(chatId, { step: 'awaiting_vehicle_category', mode: 'vehicle_manager', selectedCategory: null, selectedVehicleId: null })
+    saveSession(chatId, { step: 'awaiting_vehicle_category', selectedCategory: null, selectedVehicleId: null, vehicleAction: null })
     await answerCallbackQuery(callback.id, 'Vehicle manager')
     await sendMessage(chatId, 'Choose a vehicle category.', categoryButtons('admin:vehicle_category'))
     return
   }
 
   if (data === 'admin:pricing_change') {
-    saveSession(chatId, { step: 'awaiting_pricing_mode', mode: null, selectedCategory: null, selectedVehicleId: null })
     await answerCallbackQuery(callback.id, 'Pricing change')
     await sendMessage(chatId, 'Choose a pricing action.', [
       [{ text: 'Change all prices by %', callback_data: 'admin:pricing_all' }],
@@ -280,7 +389,7 @@ async function handleCallback(callback: CallbackQuery) {
   }
 
   if (data === 'admin:view_bookings') {
-    saveSession(chatId, { step: 'awaiting_bookings_range', mode: null, selectedCategory: null, selectedVehicleId: null })
+    saveSession(chatId, { step: 'awaiting_bookings_range', selectedCategory: null, selectedVehicleId: null, vehicleAction: null })
     await answerCallbackQuery(callback.id, 'View bookings')
     await sendMessage(chatId, 'Which booking range do you want to see?', [
       [{ text: 'This week', callback_data: 'admin:bookings:week' }],
@@ -292,14 +401,14 @@ async function handleCallback(callback: CallbackQuery) {
   }
 
   if (data === 'admin:pricing_all') {
-    saveSession(chatId, { step: 'awaiting_global_percentage', mode: null, selectedCategory: null, selectedVehicleId: null })
+    saveSession(chatId, { step: 'awaiting_global_percentage', selectedCategory: null, selectedVehicleId: null, vehicleAction: null })
     await answerCallbackQuery(callback.id, 'Change all prices')
     await sendMessage(chatId, 'Send the percentage change now. Example: +10 or -5')
     return
   }
 
   if (data === 'admin:pricing_single') {
-    saveSession(chatId, { step: 'awaiting_pricing_category', mode: 'pricing_single', selectedCategory: null, selectedVehicleId: null })
+    saveSession(chatId, { step: 'awaiting_pricing_category', selectedCategory: null, selectedVehicleId: null, vehicleAction: null })
     await answerCallbackQuery(callback.id, 'Change one vehicle')
     await sendMessage(chatId, 'Choose the vehicle category for the price change.', categoryButtons('admin:pricing_category'))
     return
@@ -308,7 +417,7 @@ async function handleCallback(callback: CallbackQuery) {
   if (data.startsWith('admin:vehicle_category:')) {
     const category = data.replace('admin:vehicle_category:', '') as VehicleCategory
     const vehicles = await getVehiclesForCategory(category)
-    saveSession(chatId, { step: 'awaiting_vehicle_selection', mode: 'vehicle_manager', selectedCategory: category, selectedVehicleId: null })
+    saveSession(chatId, { step: 'awaiting_vehicle_selection', selectedCategory: category, selectedVehicleId: null, vehicleAction: null })
     await answerCallbackQuery(callback.id, category)
     if (vehicles.length === 0) {
       await sendMessage(chatId, `No vehicles found in ${category}.`, [[{ text: 'Main menu', callback_data: 'admin:main_menu' }]])
@@ -318,10 +427,50 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
+  if (data.startsWith('admin:vehicle:')) {
+    const vehicleId = data.replace('admin:vehicle:', '')
+    const vehicle = await getVehicleById(vehicleId)
+    saveSession(chatId, { selectedVehicleId: vehicleId, vehicleAction: null, step: 'awaiting_vehicle_selection' })
+    await answerCallbackQuery(callback.id, vehicle?.model || 'Vehicle selected')
+    await sendMessage(chatId, `${vehicle?.model || 'This vehicle'} selected. What do you want to do?`, [
+      [{ text: 'Close vehicle', callback_data: 'admin:vehicle_action:close' }],
+      [{ text: 'Open vehicle', callback_data: 'admin:vehicle_action:open' }],
+      [{ text: 'Main menu', callback_data: 'admin:main_menu' }],
+    ])
+    return
+  }
+
+  if (data.startsWith('admin:vehicle_action:')) {
+    const action = data.replace('admin:vehicle_action:', '') as VehicleAction
+    const session = getSession(chatId)
+    const vehicle = session.selectedVehicleId ? await getVehicleById(session.selectedVehicleId) : null
+    if (!session.selectedVehicleId || !vehicle) {
+      await answerCallbackQuery(callback.id, 'Choose a vehicle first')
+      await sendMainMenu(chatId, 'Choose Vehicle manager again and select a vehicle first.')
+      return
+    }
+
+    if (action === 'open') {
+      const result = await openVehicleForBooking(session.selectedVehicleId)
+      await answerCallbackQuery(callback.id, 'Vehicle opened')
+      if (!result.ok) {
+        await sendMessage(chatId, `Could not open the vehicle: ${result.error}`)
+        return
+      }
+      await sendMainMenu(chatId, `${result.vehicle.model} is now open and bookable again.`)
+      return
+    }
+
+    saveSession(chatId, { step: 'awaiting_vehicle_dates', vehicleAction: 'close' })
+    await answerCallbackQuery(callback.id, 'Close vehicle')
+    await sendMessage(chatId, `Send the dates to close ${vehicle.model}. Example: 16/05/2026 to 20/05/2026`)
+    return
+  }
+
   if (data.startsWith('admin:pricing_category:')) {
     const category = data.replace('admin:pricing_category:', '') as VehicleCategory
     const vehicles = await getVehiclesForCategory(category)
-    saveSession(chatId, { step: 'awaiting_pricing_vehicle', mode: 'pricing_single', selectedCategory: category, selectedVehicleId: null })
+    saveSession(chatId, { step: 'awaiting_pricing_vehicle', selectedCategory: category, selectedVehicleId: null })
     await answerCallbackQuery(callback.id, category)
     if (vehicles.length === 0) {
       await sendMessage(chatId, `No vehicles found in ${category}.`, [[{ text: 'Main menu', callback_data: 'admin:main_menu' }]])
@@ -331,21 +480,12 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
-  if (data.startsWith('admin:vehicle:')) {
-    const vehicleId = data.replace('admin:vehicle:', '')
-    const vehicle = await getVehicleById(vehicleId)
-    saveSession(chatId, { step: 'awaiting_vehicle_dates', selectedVehicleId: vehicleId })
-    await answerCallbackQuery(callback.id, vehicle?.model || 'Vehicle selected')
-    await sendMessage(chatId, `Send the booked dates for ${vehicle?.model || 'this vehicle'}. Example: 16/05/2026 to 20/05/2026`) 
-    return
-  }
-
   if (data.startsWith('admin:price_vehicle:')) {
     const vehicleId = data.replace('admin:price_vehicle:', '')
     const vehicle = await getVehicleById(vehicleId)
     saveSession(chatId, { step: 'awaiting_single_price', selectedVehicleId: vehicleId })
     await answerCallbackQuery(callback.id, vehicle?.model || 'Vehicle selected')
-    await sendMessage(chatId, `Send the new daily rate for ${vehicle?.model || 'this vehicle'}. Format accepted: R3000 or 3000`) 
+    await sendMessage(chatId, `Send the new daily rate for ${vehicle?.model || 'this vehicle'}. Format accepted: R3000 or 3000`)
     return
   }
 
@@ -369,7 +509,17 @@ async function handleCallback(callback: CallbackQuery) {
     })
 
     await sendMessage(chatId, [`Bookings found: ${bookings.length}`, '', ...lines].join('\n\n'), [[{ text: 'Main menu', callback_data: 'admin:main_menu' }]])
-    saveSession(chatId, { step: 'home', mode: null, selectedCategory: null, selectedVehicleId: null })
+    saveSession(chatId, { step: 'home', selectedCategory: null, selectedVehicleId: null, vehicleAction: null })
+    return
+  }
+
+  if (data.startsWith('admin:booking_confirm:')) {
+    await handleBookingAction(chatId, callback.id, data.replace('admin:booking_confirm:', ''), 'confirm')
+    return
+  }
+
+  if (data.startsWith('admin:booking_paid:')) {
+    await handleBookingAction(chatId, callback.id, data.replace('admin:booking_paid:', ''), 'paid')
   }
 }
 
@@ -385,20 +535,20 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
-  if (session.step === 'awaiting_vehicle_dates' && session.selectedVehicleId) {
+  if (session.step === 'awaiting_vehicle_dates' && session.selectedVehicleId && session.vehicleAction === 'close') {
     const range = parseDateRange(text)
     if (!range) {
-      await sendMessage(chatId, 'I need a valid booked date range. Example: 16/05/2026 to 20/05/2026')
+      await sendMessage(chatId, 'I need a valid closeout date range. Example: 16/05/2026 to 20/05/2026')
       return
     }
 
-    const result = await markVehicleBooked(session.selectedVehicleId, range.startDate, range.endDate)
+    const result = await closeVehicleForDates(session.selectedVehicleId, range.startDate, range.endDate)
     if (!result.ok) {
-      await sendMessage(chatId, `Could not update the vehicle: ${result.error}`)
+      await sendMessage(chatId, `Could not close the vehicle: ${result.error}`)
       return
     }
 
-    await sendMainMenu(chatId, `${result.vehicle.model} is now marked booked from ${range.startDate} to ${range.endDate}. This has been pushed to the fleet and booking flow.`)
+    await sendMainMenu(chatId, `${result.vehicle.model} is now closed from ${range.startDate} to ${range.endDate}. It will stay hidden from the customer vehicle list.`)
     return
   }
 
@@ -450,11 +600,6 @@ export async function processTelegramAdminUpdate(update: TelegramUpdate) {
   }
 }
 
-function customerChatUrl(chatId: string, username?: string | null) {
-  if (username) return `https://t.me/${username}`
-  return `tg://user?id=${chatId}`
-}
-
 export async function notifyAdminNewBooking(input: {
   bookingId: string
   chatId: string
@@ -473,6 +618,12 @@ export async function notifyAdminNewBooking(input: {
   const adminChatIds = await getAdminSubscriberChatIds()
   if (adminChatIds.length === 0) return
 
+  const booking = await getTelegramBookingById(input.bookingId)
+  if (booking) {
+    await Promise.all(adminChatIds.map((adminChatId) => sendBookingSummary(adminChatId, booking, 'New booking')))
+    return
+  }
+
   const summary = [
     'New booking',
     '',
@@ -485,11 +636,16 @@ export async function notifyAdminNewBooking(input: {
     `Dates: ${input.startDate || 'No start date'} → ${input.endDate || 'No end date'}`,
     `Days: ${input.totalDays || 0}`,
     `Total: ${input.totalAmount ? money(input.totalAmount) : 'No total yet'}`,
+    'Status: pending',
   ].join('\n')
 
   await Promise.all(adminChatIds.map(async (adminChatId) => {
-    await sendMessage(adminChatId, summary, [[{ text: 'Collect Payment', url: customerChatUrl(input.chatId, input.username) }]])
+    await sendMessage(adminChatId, summary, [
+      [{ text: 'Collect Payment', url: customerChatUrl(input.chatId, input.username || null) }],
+      [{ text: 'Confirm Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
+      [{ text: 'Payment Collected', callback_data: `admin:booking_paid:${input.bookingId}` }],
+    ])
     if (input.idImageUrl) await sendPhoto(adminChatId, input.idImageUrl, 'Customer ID / passport')
-    if (input.licenseImageUrl) await sendPhoto(adminChatId, input.licenseImageUrl, 'Driver\'s license')
+    if (input.licenseImageUrl) await sendPhoto(adminChatId, input.licenseImageUrl, 'Driver’s license')
   }))
 }

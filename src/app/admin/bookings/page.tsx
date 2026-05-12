@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 type TelegramBooking = {
@@ -23,13 +23,15 @@ type TelegramBooking = {
     full_name: string | null
     phone: string | null
     telegram_name: string | null
+    telegram_username?: string | null
   } | null
 }
 
-const STATUS_OPTIONS = ['pre_confirmation', 'confirmed', 'cancelled'] as const
+const STATUS_OPTIONS = ['pending', 'confirmed_booking', 'confirmed', 'cancelled'] as const
 
 const STATUS_STYLES: Record<string, string> = {
-  pre_confirmation: 'bg-amber-50 text-amber-700 border-amber-200',
+  pending: 'bg-amber-50 text-amber-700 border-amber-200',
+  confirmed_booking: 'bg-blue-50 text-blue-700 border-blue-200',
   confirmed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   cancelled: 'bg-red-50 text-red-600 border-red-200',
 }
@@ -41,6 +43,10 @@ function bookingCode(id: string) {
 function displayDoc(value: string | null) {
   if (!value) return null
   return value.startsWith('/api/') ? value : `/api/telegram/file/${encodeURIComponent(value)}`
+}
+
+function pendingUntil(createdAt: string) {
+  return new Date(new Date(createdAt).getTime() + 24 * 60 * 60 * 1000)
 }
 
 export default function BookingsPage() {
@@ -55,11 +61,15 @@ export default function BookingsPage() {
     setLoading(true)
     const { data } = await supabase
       .from('telegram_bookings')
-      .select('*, telegram_customers(full_name, phone, telegram_name)')
-      .in('status', ['pre_confirmation', 'confirmed', 'cancelled'])
+      .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
+      .in('status', [...STATUS_OPTIONS, 'pre_confirmation'])
       .order('updated_at', { ascending: false })
 
-    setBookings((data as TelegramBooking[]) ?? [])
+    const normalized = ((data as TelegramBooking[]) ?? []).map((booking) => ({
+      ...booking,
+      status: booking.status === 'pre_confirmation' ? 'pending' : booking.status,
+    }))
+    setBookings(normalized)
     setLoading(false)
   }, [supabase])
 
@@ -68,26 +78,13 @@ export default function BookingsPage() {
   const syncConfirmedRental = async (booking: TelegramBooking) => {
     const email = `telegram-${booking.chat_id}@cape-cars.local`
 
-    const { data: customer } = await supabase
-      .from('customers')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle()
-
-    const { data: vehicle } = await supabase
-      .from('vehicles')
-      .select('id')
-      .eq('model', booking.vehicle_name)
-      .maybeSingle()
+    const { data: customer } = await supabase.from('customers').select('id').eq('email', email).maybeSingle()
+    const { data: vehicle } = await supabase.from('vehicles').select('id').eq('model', booking.vehicle_name).maybeSingle()
 
     if (!vehicle?.id || !customer?.id || !booking.start_date || !booking.end_date) return
 
     const notes = `Telegram booking ${booking.id}`
-    const { data: existing } = await supabase
-      .from('rentals')
-      .select('id')
-      .eq('notes', notes)
-      .maybeSingle()
+    const { data: existing } = await supabase.from('rentals').select('id').eq('notes', notes).maybeSingle()
 
     if (existing?.id) {
       await supabase.from('rentals').update({ status: 'confirmed' }).eq('id', existing.id)
@@ -118,6 +115,13 @@ export default function BookingsPage() {
     setUpdatingId(null)
   }
 
+  const counts = useMemo(() => ({
+    pending: bookings.filter((booking) => booking.status === 'pending').length,
+    confirmed_booking: bookings.filter((booking) => booking.status === 'confirmed_booking').length,
+    confirmed: bookings.filter((booking) => booking.status === 'confirmed').length,
+    cancelled: bookings.filter((booking) => booking.status === 'cancelled').length,
+  }), [bookings])
+
   const filtered = filterStatus === 'all' ? bookings : bookings.filter((booking) => booking.status === filterStatus)
 
   return (
@@ -125,16 +129,16 @@ export default function BookingsPage() {
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-light text-neutral-900">Bookings</h1>
-          <p className="mt-1 text-sm text-neutral-500">Telegram customers who completed the flow and are ready for manual confirmation</p>
+          <p className="mt-1 text-sm text-neutral-500">Pending holds, confirmed bookings, payment collection, and document review</p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Total bookings', value: bookings.length },
-          { label: 'Pre confirmation', value: bookings.filter((booking) => booking.status === 'pre_confirmation').length },
-          { label: 'Confirmed', value: bookings.filter((booking) => booking.status === 'confirmed').length },
-          { label: 'Cancelled', value: bookings.filter((booking) => booking.status === 'cancelled').length },
+          { label: 'Pending', value: counts.pending },
+          { label: 'Confirmed booking', value: counts.confirmed_booking },
+          { label: 'Payment collected', value: counts.confirmed },
+          { label: 'Cancelled', value: counts.cancelled },
         ].map((card) => (
           <div key={card.label} className="bg-white rounded-2xl p-4 border border-black/[0.06]">
             <div className="text-[10px] tracking-[0.25em] uppercase text-neutral-400">{card.label}</div>
@@ -178,62 +182,87 @@ export default function BookingsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/[0.04]">
-                {filtered.map((booking) => (
-                  <>
-                    <tr key={booking.id} className="hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setExpandedId(expandedId === booking.id ? null : booking.id)}>
-                      <td className="px-5 py-4 font-medium text-neutral-900">{bookingCode(booking.id)}</td>
-                      <td className="px-5 py-4">
-                        <div className="font-medium text-neutral-900">{booking.telegram_customers?.full_name || booking.telegram_customers?.telegram_name || 'Unnamed customer'}</div>
-                        <div className="text-xs text-neutral-400 mt-0.5">{booking.telegram_customers?.phone || booking.chat_id}</div>
-                      </td>
-                      <td className="px-5 py-4 text-neutral-600 hidden md:table-cell">{booking.vehicle_name || '—'}</td>
-                      <td className="px-5 py-4 hidden md:table-cell text-neutral-500">
-                        {booking.start_date ? `${booking.start_date} → ${booking.end_date}` : '—'}
-                      </td>
-                      <td className="px-5 py-4 hidden lg:table-cell text-neutral-900">{booking.total_amount ? `R ${booking.total_amount.toLocaleString('en-ZA')}` : '—'}</td>
-                      <td className="px-5 py-4">
-                        <select
-                          value={booking.status}
-                          disabled={updatingId === booking.id}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => updateStatus(booking, event.target.value)}
-                          className={`px-2.5 py-1 rounded-full text-[10px] tracking-[0.1em] uppercase font-medium border cursor-pointer focus:outline-none ${STATUS_STYLES[booking.status] || 'bg-neutral-50 border-black/[0.08] text-neutral-500'}`}
-                        >
-                          {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status.replace('_', ' ')}</option>)}
-                        </select>
-                      </td>
-                    </tr>
-                    {expandedId === booking.id && (
-                      <tr key={`${booking.id}-expanded`} className="bg-neutral-50">
-                        <td colSpan={6} className="px-5 py-4">
-                          <div className="grid gap-4 md:grid-cols-4 text-sm">
-                            <div>
-                              <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Booking code</div>
-                              <div className="text-neutral-700">{bookingCode(booking.id)}</div>
+                {filtered.map((booking) => {
+                  const holdUntil = pendingUntil(booking.created_at)
+                  const holdExpired = booking.status === 'pending' && holdUntil.getTime() < Date.now()
+
+                  return (
+                    <>
+                      <tr key={booking.id} className="hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setExpandedId(expandedId === booking.id ? null : booking.id)}>
+                        <td className="px-5 py-4 font-medium text-neutral-900">{bookingCode(booking.id)}</td>
+                        <td className="px-5 py-4">
+                          <div className="font-medium text-neutral-900">{booking.telegram_customers?.full_name || booking.telegram_customers?.telegram_name || 'Unnamed customer'}</div>
+                          <div className="text-xs text-neutral-400 mt-0.5">{booking.telegram_customers?.phone || booking.chat_id}</div>
+                          {booking.status === 'pending' && (
+                            <div className={`text-[11px] mt-1 ${holdExpired ? 'text-red-500' : 'text-amber-600'}`}>
+                              Hold until {holdUntil.toLocaleString('en-ZA')}
                             </div>
-                            <div>
-                              <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Rental window</div>
-                              <div className="text-neutral-700">{booking.start_date || '—'}</div>
-                              <div className="text-xs text-neutral-500">{booking.total_days || 0} day(s)</div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Documents</div>
-                              <div className="flex flex-col gap-1">
-                                {displayDoc(booking.id_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.id_file_id)!} target="_blank">View ID / passport</a> : <span className="text-neutral-300">No ID / passport</span>}
-                                {displayDoc(booking.license_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.license_file_id)!} target="_blank">View license</a> : <span className="text-neutral-300">No license</span>}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Summary</div>
-                              <div className="text-neutral-700">{booking.vehicle_name || 'Vehicle pending'}</div>
-                              <div className="text-xs text-neutral-500">{booking.total_amount ? `R ${booking.total_amount.toLocaleString('en-ZA')}` : 'No total yet'}</div>
-                            </div>
-                          </div>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 text-neutral-600 hidden md:table-cell">{booking.vehicle_name || '—'}</td>
+                        <td className="px-5 py-4 hidden md:table-cell text-neutral-500">
+                          {booking.start_date ? `${booking.start_date} → ${booking.end_date}` : '—'}
+                        </td>
+                        <td className="px-5 py-4 hidden lg:table-cell text-neutral-900">{booking.total_amount ? `R ${booking.total_amount.toLocaleString('en-ZA')}` : '—'}</td>
+                        <td className="px-5 py-4">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] tracking-[0.1em] uppercase font-medium border ${STATUS_STYLES[booking.status] || 'bg-neutral-50 border-black/[0.08] text-neutral-500'}`}>
+                            {booking.status.replace('_', ' ')}
+                          </span>
                         </td>
                       </tr>
-                    )}
-                  </>
-                ))}
+                      {expandedId === booking.id && (
+                        <tr key={`${booking.id}-expanded`} className="bg-neutral-50">
+                          <td colSpan={6} className="px-5 py-4">
+                            <div className="grid gap-4 md:grid-cols-4 text-sm">
+                              <div>
+                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Booking code</div>
+                                <div className="text-neutral-700">{bookingCode(booking.id)}</div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Rental window</div>
+                                <div className="text-neutral-700">{booking.start_date || '—'}</div>
+                                <div className="text-xs text-neutral-500">{booking.total_days || 0} day(s)</div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Documents</div>
+                                <div className="flex flex-col gap-1">
+                                  {displayDoc(booking.id_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.id_file_id)!} target="_blank">View ID / passport</a> : <span className="text-neutral-300">No ID / passport</span>}
+                                  {displayDoc(booking.license_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.license_file_id)!} target="_blank">View license</a> : <span className="text-neutral-300">No license</span>}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Next action</div>
+                                <div className="flex flex-col gap-2">
+                                  <button
+                                    disabled={updatingId === booking.id || booking.status !== 'pending'}
+                                    onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'confirmed_booking') }}
+                                    className="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs disabled:opacity-40"
+                                  >
+                                    Confirm booking
+                                  </button>
+                                  <button
+                                    disabled={updatingId === booking.id || (booking.status !== 'pending' && booking.status !== 'confirmed_booking')}
+                                    onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'confirmed') }}
+                                    className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs disabled:opacity-40"
+                                  >
+                                    Payment collected
+                                  </button>
+                                  <button
+                                    disabled={updatingId === booking.id || booking.status === 'cancelled'}
+                                    onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'cancelled') }}
+                                    className="px-3 py-2 rounded-xl bg-white border border-red-200 text-red-600 text-xs disabled:opacity-40"
+                                  >
+                                    Cancel booking
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  )
+                })}
               </tbody>
             </table>
           </div>

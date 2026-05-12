@@ -56,7 +56,7 @@ export default function TelegramBotPage() {
 
     const [customersRes, bookingsRes, conversationsRes] = await Promise.all([
       supabase.from('telegram_customers').select('*').order('updated_at', { ascending: false }),
-      supabase.from('telegram_bookings').select('*').in('status', ['draft', 'quote_ready', 'customer_details_pending', 'documents_pending']).order('updated_at', { ascending: false }),
+      supabase.from('telegram_bookings').select('*').in('status', ['draft', 'quote_ready', 'customer_details_pending', 'documents_pending', 'pending']).order('updated_at', { ascending: false }),
       supabase.from('telegram_conversations').select('*').order('created_at', { ascending: false }).limit(200),
     ])
 
@@ -111,7 +111,7 @@ export default function TelegramBotPage() {
         {[
           { label: 'Telegram customers', value: customers.length },
           { label: 'In-progress bookings', value: bookings.length },
-          { label: 'Ready for bookings page', value: 0 },
+          { label: 'Pending holds', value: bookings.filter((booking) => booking.status === 'pending').length },
           { label: 'Messages logged', value: conversations.length },
         ].map(card => (
           <div key={card.label} className="bg-white rounded-2xl p-4 border border-black/[0.06]">
