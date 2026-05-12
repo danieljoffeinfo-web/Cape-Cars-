@@ -1,6 +1,6 @@
 'use server'
 
-import { createServerClient } from '@/lib/supabase/server'
+import { createClient } from "@/lib/supabase/server"
 
 export async function createBooking(formData: FormData) {
   const payload = {
@@ -14,7 +14,7 @@ export async function createBooking(formData: FormData) {
   }
 
   try {
-    const supabase = createServerClient()
+    const supabase = createClient()
     await supabase.from('bookings').insert(payload)
   } catch {
     // Supabase not wired up yet — silent fallback for local dev

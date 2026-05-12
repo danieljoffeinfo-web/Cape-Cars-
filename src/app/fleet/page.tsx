@@ -1,7 +1,7 @@
 import Nav from '@/components/nav'
 import Footer from '@/components/footer'
 import FleetGrid from '@/components/fleet-grid'
-import { createServerClient } from '@/lib/supabase/server'
+import { createClient } from "@/lib/supabase/server"
 import { FLEET } from '@/lib/fleet'
 import type { Vehicle } from '@/lib/fleet'
 
@@ -11,7 +11,7 @@ export const revalidate = 60
 export default async function FleetPage() {
   let vehicles: Vehicle[] = []
   try {
-    const supabase = createServerClient()
+    const supabase = createClient()
     const { data } = await supabase
       .from('vehicles')
       .select('*')

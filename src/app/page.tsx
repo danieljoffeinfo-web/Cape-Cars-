@@ -59,7 +59,7 @@ export default function Home() {
           preload="auto"
           crossOrigin="anonymous"
           disablePictureInPicture
-          poster="https://res.cloudinary.com/dmanxetyl/video/upload/so_0,q_auto:good,w_900/v1776792619/porsche_att_dpwzwo.jpg"
+          poster="https://res.cloudinary.com/dmanxetyl/video/upload/so_0,q_auto:good,w_900/v1776895908/V_Class-2_wymoxv.jpg"
           style={{
             objectPosition: 'center 40%',
             filter: 'contrast(1.12) saturate(1.15) brightness(1.04)',
@@ -67,21 +67,9 @@ export default function Home() {
             transform: 'translateZ(0)',
           }}
         >
-          {/* Mobile-first: H.264 MP4 (iOS Safari can't decode VP9/WebM) capped at 900px */}
           <source
-            src="https://res.cloudinary.com/dmanxetyl/video/upload/q_auto:good,vc_h264,w_900/v1776792619/porsche_att_dpwzwo.mp4"
-            type='video/mp4; codecs="avc1.640028"'
-            media="(max-width: 767px)"
-          />
-          {/* Desktop: VP9 WebM full quality */}
-          <source
-            src="https://res.cloudinary.com/dmanxetyl/video/upload/q_100,vc_vp9/v1776792619/porsche_att_dpwzwo.webm"
-            type='video/webm; codecs="vp9"'
-          />
-          {/* Desktop: H.264 fallback */}
-          <source
-            src="https://res.cloudinary.com/dmanxetyl/video/upload/q_100,vc_h264/v1776792619/porsche_att_dpwzwo.mp4"
-            type='video/mp4; codecs="avc1.640028"'
+            src="https://res.cloudinary.com/dmanxetyl/video/upload/v1776895908/V_Class-2_wymoxv.mp4"
+            type="video/mp4"
           />
         </video>
 

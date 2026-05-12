@@ -7,13 +7,15 @@ import { usePathname } from 'next/navigation'
 const PIN = '121227'
 
 const NAV = [
-  { href: '/admin',          label: 'Dashboard',    icon: '◈' },
-  { href: '/admin/fleet',    label: 'Fleet',        icon: '🏎' },
-  { href: '/admin/crm',      label: 'Customers',    icon: '👤' },
-  { href: '/admin/bookings', label: 'Bookings',     icon: '📅' },
-  { href: '/admin/invoices', label: 'Invoices',     icon: '🧾' },
-  { href: '/admin/sales',    label: 'Sales',        icon: '📈' },
-  { href: '/admin/insights', label: 'Insights',     icon: '💡' },
+  { href: '/admin',           label: 'Dashboard',    icon: '◈' },
+  { href: '/admin/fleet',     label: 'Fleet',        icon: '🏎' },
+  { href: '/admin/crm',       label: 'Customers',    icon: '👤' },
+  { href: '/admin/bookings',  label: 'Bookings',     icon: '📅' },
+  { href: '/admin/rentals',   label: 'Rentals',      icon: '🚗' },
+  { href: '/admin/invoices',  label: 'Invoices',     icon: '🧾' },
+  { href: '/admin/telegram',  label: 'Telegram',     icon: '✈️' },
+  { href: '/admin/sales',     label: 'Sales',        icon: '📈' },
+  { href: '/admin/insights',  label: 'Insights',     icon: '💡' },
 ]
 
 function PinLock({ onUnlock }: { onUnlock: () => void }) {
@@ -46,7 +48,7 @@ function PinLock({ onUnlock }: { onUnlock: () => void }) {
           <span className="w-2 h-2 rounded-full bg-white/80" />
         </span>
         <span className="text-[13px] tracking-[0.28em] uppercase font-medium text-white/70">
-          Car Demo
+          Cape Cars
         </span>
       </div>
 
@@ -135,7 +137,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
               <span className="w-1.5 h-1.5 rounded-full bg-white/80" />
             </span>
             <span className="text-[11px] tracking-[0.28em] uppercase font-medium text-white/60">
-              Admin
+              Cape Cars Admin
             </span>
           </div>
         </div>
