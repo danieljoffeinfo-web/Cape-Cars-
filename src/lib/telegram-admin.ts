@@ -31,7 +31,7 @@ export type TelegramBookingUpsert = {
 }
 
 function getAdminClient() {
-  const key = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY
+  const key = SUPABASE_ANON_KEY || SUPABASE_SERVICE_ROLE_KEY
   if (!SUPABASE_URL || !key) return null
 
   return createClient(SUPABASE_URL, key, {
