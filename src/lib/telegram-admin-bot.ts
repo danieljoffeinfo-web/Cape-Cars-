@@ -125,26 +125,45 @@ async function sendPhoto(chatId: string, photo: string, caption?: string) {
   })
 }
 
-async function resolveCustomerBotFileUrl(fileId: string) {
-  if (!TELEGRAM_CUSTOMER_BOT_TOKEN) return null
+async function sendPhotoFromCustomerFileId(chatId: string, fileId: string, caption?: string) {
+  if (!TELEGRAM_CUSTOMER_BOT_TOKEN || !TELEGRAM_ADMIN_BOT_TOKEN) throw new Error('Missing Telegram bot token')
 
-  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_CUSTOMER_BOT_TOKEN}/getFile`, {
+  const metaResponse = await fetch(`https://api.telegram.org/bot${TELEGRAM_CUSTOMER_BOT_TOKEN}/getFile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ file_id: fileId }),
   })
 
-  if (!response.ok) return null
-  const payload = await response.json()
-  const filePath = payload?.result?.file_path
-  if (!filePath) return null
-  return `https://api.telegram.org/file/bot${TELEGRAM_CUSTOMER_BOT_TOKEN}/${filePath}`
+  const metaPayload = await metaResponse.json()
+  const filePath = metaPayload?.result?.file_path
+  if (!metaResponse.ok || !filePath) throw new Error('Could not resolve Telegram file path')
+
+  const fileResponse = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_CUSTOMER_BOT_TOKEN}/${filePath}`)
+  if (!fileResponse.ok) throw new Error('Could not download Telegram file')
+
+  const contentType = fileResponse.headers.get('content-type') || 'image/jpeg'
+  const fileBuffer = await fileResponse.arrayBuffer()
+  const extension = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+
+  const form = new FormData()
+  form.append('chat_id', chatId)
+  if (caption) form.append('caption', caption)
+  form.append('photo', new Blob([fileBuffer], { type: contentType }), `telegram-upload.${extension}`)
+
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_ADMIN_BOT_TOKEN}/sendPhoto`, {
+    method: 'POST',
+    body: form,
+  })
+
+  if (!response.ok) {
+    throw new Error(`Admin Telegram API sendPhoto upload failed: ${response.status} ${await response.text()}`)
+  }
 }
 
-async function sendPhotoBestEffort(chatId: string, photo: string | null, caption?: string) {
-  if (!photo) return
+async function sendPhotoBestEffort(chatId: string, fileId: string | null, caption?: string) {
+  if (!fileId) return
   try {
-    await sendPhoto(chatId, photo, caption)
+    await sendPhotoFromCustomerFileId(chatId, fileId, caption)
   } catch (error) {
     console.error('sendPhotoBestEffort failed', { chatId, caption, error })
   }
@@ -342,10 +361,8 @@ async function sendBookingSummary(chatId: string, booking: TelegramBookingWithCu
 
   await sendMessage(chatId, summary, bookingActionButtons(booking))
 
-  const idUrl = booking.id_file_id ? await resolveCustomerBotFileUrl(booking.id_file_id) : null
-  const licenseUrl = booking.license_file_id ? await resolveCustomerBotFileUrl(booking.license_file_id) : null
-  await sendPhotoBestEffort(chatId, idUrl, 'Customer ID / passport')
-  await sendPhotoBestEffort(chatId, licenseUrl, 'Driver’s license')
+  await sendPhotoBestEffort(chatId, booking.id_file_id ?? null, 'Customer ID / passport')
+  await sendPhotoBestEffort(chatId, booking.license_file_id ?? null, 'Driver’s license')
 }
 
 async function handleBookingAction(chatId: string, callbackId: string, bookingId: string, action: 'confirm' | 'paid') {
@@ -669,9 +686,7 @@ export async function notifyAdminNewBooking(input: {
       [{ text: 'Confirm Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
       [{ text: 'Payment Collected', callback_data: `admin:booking_paid:${input.bookingId}` }],
     ])
-    const idUrl = input.idFileId ? await resolveCustomerBotFileUrl(input.idFileId) : null
-    const licenseUrl = input.licenseFileId ? await resolveCustomerBotFileUrl(input.licenseFileId) : null
-    await sendPhotoBestEffort(adminChatId, idUrl, 'Customer ID / passport')
-    await sendPhotoBestEffort(adminChatId, licenseUrl, 'Driver’s license')
+    await sendPhotoBestEffort(adminChatId, input.idFileId ?? null, 'Customer ID / passport')
+    await sendPhotoBestEffort(adminChatId, input.licenseFileId ?? null, 'Driver’s license')
   }))
 }
