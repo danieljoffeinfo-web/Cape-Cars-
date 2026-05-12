@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, type TelegramCatalogVehicle, type VehicleCategory } from '@/lib/telegram-catalog'
-import { buildTelegramProxyUrl, getAvailableVehiclesForCategory, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
+import { buildAbsoluteTelegramProxyUrl, buildTelegramProxyUrl, getAvailableVehiclesForCategory, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
+import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
 
 export type SessionStep =
   | 'choosing_category'
@@ -252,7 +253,11 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory) {
       }))
     : vehiclesForCategory(category).filter((vehicle) => vehicle.status === 'Available')
 
-  await sendMessage(chatId, `${category} — ${formatCurrency(CATEGORY_PRICING[category])} per day. Choose a vehicle below.`)
+  const intro = liveVehicles && liveVehicles.length > 0
+    ? `${category}. Choose a vehicle below.`
+    : `${category} — ${formatCurrency(CATEGORY_PRICING[category])} per day. Choose a vehicle below.`
+
+  await sendMessage(chatId, intro)
 
   for (const vehicle of vehicles) {
     await sendPhoto(
@@ -662,6 +667,27 @@ async function handleMessage(message: TelegramMessage) {
     session = await saveSession(chatId, { step: 'completed', license_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
     await persistBooking(session, 'pre_confirmation')
+
+    try {
+      await notifyAdminNewBooking({
+        bookingId: session.booking_id ?? '',
+        chatId,
+        customerName: session.customer_full_name ?? session.telegram_name ?? null,
+        phone: session.customer_phone ?? null,
+        username: session.telegram_username ?? null,
+        vehicleName: session.selected_vehicle_model ?? null,
+        vehicleCategory: session.selected_category ?? null,
+        startDate: session.requested_start_date ?? null,
+        endDate: session.requested_end_date ?? null,
+        totalDays: session.requested_days ?? null,
+        totalAmount: session.total_amount ?? null,
+        idImageUrl: session.id_file_id ? buildAbsoluteTelegramProxyUrl(session.id_file_id) : null,
+        licenseImageUrl: fileId ? buildAbsoluteTelegramProxyUrl(fileId) : null,
+      })
+    } catch (error) {
+      console.error('notifyAdminNewBooking failed', error)
+    }
+
     await sendMessage(chatId, 'Perfect. Cape Cars will confirm your booking shortly.')
     return
   }
