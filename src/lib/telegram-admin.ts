@@ -134,6 +134,12 @@ function deriveHoldExpiresAt(status?: string | null) {
     : null
 }
 
+function isMissingColumnError(error: unknown) {
+  return error && typeof error === 'object' && 'message' in error
+    ? String((error as { message?: string }).message || '').toLowerCase().includes('column')
+    : false
+}
+
 export async function upsertTelegramCustomer(input: TelegramCustomerUpsert) {
   const supabase = getAdminClient()
   if (!supabase) return null
@@ -229,18 +235,27 @@ export async function upsertTelegramBooking(input: TelegramBookingUpsert) {
       updated_at: new Date().toISOString(),
     }
 
-    const { data, error } = await supabase
+    let result = await supabase
       .from('telegram_bookings')
       .upsert(payload, { onConflict: 'id' })
       .select('*')
       .single()
 
-    if (error) {
-      console.error('upsertTelegramBooking failed', error)
+    if (result.error && isMissingColumnError(result.error)) {
+      const { booking_code, hold_expires_at, released_at, ...legacyPayload } = payload
+      result = await supabase
+        .from('telegram_bookings')
+        .upsert(legacyPayload, { onConflict: 'id' })
+        .select('*')
+        .single()
+    }
+
+    if (result.error) {
+      console.error('upsertTelegramBooking failed', result.error)
       return null
     }
 
-    return data
+    return result.data
   } catch (error) {
     console.error('upsertTelegramBooking exception', error)
     return null
@@ -276,24 +291,36 @@ export async function updateTelegramBookingStatus(bookingId: string, status: str
 
   try {
     const releaseStatuses = ['expired', 'cancelled']
-    const { data, error } = await supabase
+    const payload = {
+      status,
+      hold_expires_at: deriveHoldExpiresAt(status),
+      released_at: releaseStatuses.includes(status) ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    }
+
+    let result = await supabase
       .from('telegram_bookings')
-      .update({
-        status,
-        hold_expires_at: deriveHoldExpiresAt(status),
-        released_at: releaseStatuses.includes(status) ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
-      })
+      .update(payload)
       .eq('id', bookingId)
       .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
       .single()
 
-    if (error) {
-      console.error('updateTelegramBookingStatus failed', error)
+    if (result.error && isMissingColumnError(result.error)) {
+      const { hold_expires_at, released_at, ...legacyPayload } = payload
+      result = await supabase
+        .from('telegram_bookings')
+        .update(legacyPayload)
+        .eq('id', bookingId)
+        .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
+        .single()
+    }
+
+    if (result.error) {
+      console.error('updateTelegramBookingStatus failed', result.error)
       return null
     }
 
-    return data as TelegramBookingWithCustomer
+    return result.data as TelegramBookingWithCustomer
   } catch (error) {
     console.error('updateTelegramBookingStatus exception', error)
     return null
@@ -307,29 +334,43 @@ export async function releaseExpiredPendingBookings() {
   try {
     const nowIso = new Date().toISOString()
 
-    const { data, error } = await supabase
+    let result: any = await supabase
       .from('telegram_bookings')
       .select('id, created_at, hold_expires_at, status, released_at')
       .in('status', ['pending', 'pre_confirmation'])
 
-    if (error) {
-      console.error('releaseExpiredPendingBookings failed', error)
+    if (result.error && isMissingColumnError(result.error)) {
+      result = await supabase
+        .from('telegram_bookings')
+        .select('id, created_at, status')
+        .in('status', ['pending', 'pre_confirmation'])
+    }
+
+    if (result.error) {
+      console.error('releaseExpiredPendingBookings failed', result.error)
       return 0
     }
 
-    const expiredIds = ((data ?? []) as Array<{ id: string, created_at: string, hold_expires_at?: string | null, status: string, released_at?: string | null }>)
+    const expiredIds = ((result.data ?? []) as Array<{ id: string, created_at: string, hold_expires_at?: string | null, status: string, released_at?: string | null }>)
       .filter((booking) => !bookingHoldIsActive(booking) && !booking.released_at)
       .map((booking) => booking.id)
 
     if (expiredIds.length === 0) return 0
 
-    const { error: updateError } = await supabase
+    let updateResult = await supabase
       .from('telegram_bookings')
       .update({ status: 'expired', released_at: nowIso, updated_at: nowIso })
       .in('id', expiredIds)
 
-    if (updateError) {
-      console.error('releaseExpiredPendingBookings update failed', updateError)
+    if (updateResult.error && isMissingColumnError(updateResult.error)) {
+      updateResult = await supabase
+        .from('telegram_bookings')
+        .update({ status: 'expired', updated_at: nowIso })
+        .in('id', expiredIds)
+    }
+
+    if (updateResult.error) {
+      console.error('releaseExpiredPendingBookings update failed', updateResult.error)
       return 0
     }
 
@@ -361,17 +402,31 @@ export async function getAvailableVehiclesForCategory(category: string) {
         .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected']),
     ])
 
-    if (vehiclesError) {
-      console.error('getAvailableVehiclesForCategory vehicles failed', vehiclesError)
-      return null
-    }
-    if (bookingsError) {
+    let safeBookings: any = bookings
+    if (bookingsError && isMissingColumnError(bookingsError)) {
+      const legacy = await supabase
+        .from('telegram_bookings')
+        .select('vehicle_name, status, created_at')
+        .eq('vehicle_category', category)
+        .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected'])
+
+      if (legacy.error) {
+        console.error('getAvailableVehiclesForCategory bookings failed', legacy.error)
+        return null
+      }
+
+      safeBookings = legacy.data
+    } else if (bookingsError) {
       console.error('getAvailableVehiclesForCategory bookings failed', bookingsError)
       return null
     }
 
+    if (vehiclesError) {
+      console.error('getAvailableVehiclesForCategory vehicles failed', vehiclesError)
+      return null
+    }
     const blockedModels = new Set(
-      ((bookings ?? []) as { vehicle_name: string | null, status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }[])
+      ((safeBookings ?? []) as { vehicle_name: string | null, status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }[])
         .filter((booking) => booking.vehicle_name && bookingHoldIsActive(booking))
         .map((booking) => booking.vehicle_name as string),
     )
