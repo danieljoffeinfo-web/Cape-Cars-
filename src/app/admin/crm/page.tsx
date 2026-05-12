@@ -25,6 +25,8 @@ const emptyForm = (): Omit<Customer, 'id' | 'created_at'> => ({
   address: '',
 })
 
+const isDocumentLink = (value: string | null) => Boolean(value && (value.startsWith('/api/') || value.startsWith('http')))
+
 export default function CRMPage() {
   const supabase = createClient()
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -185,7 +187,9 @@ export default function CRMPage() {
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell">
                       <span className={`text-sm ${c.drivers_license_number ? 'text-neutral-700' : 'text-neutral-300'}`}>
-                        {c.drivers_license_number || '—'}
+                        {isDocumentLink(c.drivers_license_number)
+                          ? <a href={c.drivers_license_number!} target="_blank" className="underline underline-offset-2">View license</a>
+                          : (c.drivers_license_number || '—')}
                       </span>
                     </td>
                     <td className="px-5 py-4 hidden lg:table-cell">
@@ -240,11 +244,11 @@ export default function CRMPage() {
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">ID Number</div>
-                  <div className="text-neutral-700">{selected.id_number || '—'}</div>
+                  <div className="text-neutral-700">{isDocumentLink(selected.id_number) ? <a href={selected.id_number!} target="_blank" className="underline underline-offset-2">View ID document</a> : (selected.id_number || '—')}</div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">License #</div>
-                  <div className="text-neutral-700">{selected.drivers_license_number || '—'}</div>
+                  <div className="text-neutral-700">{isDocumentLink(selected.drivers_license_number) ? <a href={selected.drivers_license_number!} target="_blank" className="underline underline-offset-2">View driver license</a> : (selected.drivers_license_number || '—')}</div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">License Expiry</div>
@@ -295,11 +299,11 @@ export default function CRMPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">SA ID Number</label>
-                  <input value={form.id_number ?? ''} onChange={e => setForm(f => ({...f, id_number: e.target.value}))} placeholder="13-digit ID" className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm focus:outline-none focus:border-neutral-400 bg-white" />
+                  <input value={form.id_number ?? ''} onChange={e => setForm(f => ({...f, id_number: e.target.value}))} placeholder="ID number or document link" className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm focus:outline-none focus:border-neutral-400 bg-white" />
                 </div>
                 <div>
                   <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">Driver's License #</label>
-                  <input value={form.drivers_license_number ?? ''} onChange={e => setForm(f => ({...f, drivers_license_number: e.target.value}))} placeholder="License number" className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm focus:outline-none focus:border-neutral-400 bg-white" />
+                  <input value={form.drivers_license_number ?? ''} onChange={e => setForm(f => ({...f, drivers_license_number: e.target.value}))} placeholder="License number or document link" className="w-full px-4 py-2.5 rounded-xl border border-black/[0.1] text-sm focus:outline-none focus:border-neutral-400 bg-white" />
                 </div>
                 <div>
                   <label className="block text-[10px] tracking-[0.2em] uppercase text-neutral-400 mb-1.5">License Expiry</label>

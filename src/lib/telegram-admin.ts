@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 export type TelegramCustomerUpsert = {
   chatId: string
@@ -9,6 +10,8 @@ export type TelegramCustomerUpsert = {
   telegramUsername?: string | null
   fullName?: string | null
   phone?: string | null
+  idUrl?: string | null
+  licenseUrl?: string | null
 }
 
 export type TelegramBookingUpsert = {
@@ -28,10 +31,20 @@ export type TelegramBookingUpsert = {
 }
 
 function getAdminClient() {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return null
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  const key = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY
+  if (!SUPABASE_URL || !key) return null
+
+  return createClient(SUPABASE_URL, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+}
+
+function crmEmail(chatId: string) {
+  return `telegram-${chatId}@cape-cars.local`
+}
+
+export function buildTelegramProxyUrl(fileId: string) {
+  return `/api/telegram/file/${encodeURIComponent(fileId)}`
 }
 
 export async function upsertTelegramCustomer(input: TelegramCustomerUpsert) {
@@ -54,9 +67,28 @@ export async function upsertTelegramCustomer(input: TelegramCustomerUpsert) {
       .select('*')
       .single()
 
-    if (error) return null
+    if (error) {
+      console.error('upsertTelegramCustomer failed', error)
+      return null
+    }
+
+    const { error: crmError } = await supabase
+      .from('customers')
+      .upsert({
+        email: crmEmail(input.chatId),
+        full_name: input.fullName || input.telegramName || `Telegram ${input.chatId}`,
+        phone: input.phone ?? null,
+        id_number: input.idUrl ?? null,
+        drivers_license_number: input.licenseUrl ?? null,
+      }, { onConflict: 'email' })
+
+    if (crmError) {
+      console.error('upsert CRM customer failed', crmError)
+    }
+
     return data
-  } catch {
+  } catch (error) {
+    console.error('upsertTelegramCustomer exception', error)
     return null
   }
 }
@@ -73,7 +105,7 @@ export async function logTelegramConversation(params: {
   if (!supabase) return
 
   try {
-    await supabase.from('telegram_conversations').insert({
+    const { error } = await supabase.from('telegram_conversations').insert({
       chat_id: params.chatId,
       customer_id: params.customerId ?? null,
       direction: params.direction,
@@ -81,7 +113,11 @@ export async function logTelegramConversation(params: {
       body: params.body ?? null,
       meta: params.meta ?? null,
     })
-  } catch {}
+
+    if (error) console.error('logTelegramConversation failed', error)
+  } catch (error) {
+    console.error('logTelegramConversation exception', error)
+  }
 }
 
 export async function upsertTelegramBooking(input: TelegramBookingUpsert) {
@@ -112,9 +148,38 @@ export async function upsertTelegramBooking(input: TelegramBookingUpsert) {
       .select('*')
       .single()
 
-    if (error) return null
+    if (error) {
+      console.error('upsertTelegramBooking failed', error)
+      return null
+    }
+
     return data
-  } catch {
+  } catch (error) {
+    console.error('upsertTelegramBooking exception', error)
+    return null
+  }
+}
+
+export async function getAvailableVehiclesForCategory(category: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return null
+
+  try {
+    const { data, error } = await supabase
+      .from('vehicles')
+      .select('model, cat, rate, status, image_url')
+      .eq('cat', category)
+      .eq('status', 'Available')
+      .order('sort_order', { ascending: true })
+
+    if (error) {
+      console.error('getAvailableVehiclesForCategory failed', error)
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error('getAvailableVehiclesForCategory exception', error)
     return null
   }
 }

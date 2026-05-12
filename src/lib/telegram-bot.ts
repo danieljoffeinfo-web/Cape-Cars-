@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, type TelegramCatalogVehicle, type VehicleCategory } from '@/lib/telegram-catalog'
-import { logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
+import { buildTelegramProxyUrl, getAvailableVehiclesForCategory, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
 
 export type SessionStep =
   | 'choosing_category'
@@ -120,6 +120,8 @@ async function ensureCustomer(session: BotSession) {
     telegramUsername: session.telegram_username,
     fullName: session.customer_full_name,
     phone: session.customer_phone,
+    idUrl: session.id_file_id ? buildTelegramProxyUrl(session.id_file_id) : null,
+    licenseUrl: session.license_file_id ? buildTelegramProxyUrl(session.license_file_id) : null,
   })
 
   if (!customer?.id) return null
@@ -238,7 +240,18 @@ async function sendWelcome(chatId: string) {
 }
 
 async function sendCategoryCatalog(chatId: string, category: VehicleCategory) {
-  const vehicles = vehiclesForCategory(category)
+  const liveVehicles = await getAvailableVehiclesForCategory(category)
+  const vehicles = (liveVehicles && liveVehicles.length > 0)
+    ? liveVehicles.map((vehicle: any) => ({
+        id: TELEGRAM_CATALOG.find((item) => item.model === vehicle.model)?.id || vehicle.model.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        model: vehicle.model,
+        category: vehicle.cat,
+        rate: vehicle.rate,
+        status: vehicle.status,
+        imageUrl: vehicle.image_url,
+      }))
+    : vehiclesForCategory(category).filter((vehicle) => vehicle.status === 'Available')
+
   await sendMessage(chatId, `${category} — ${formatCurrency(CATEGORY_PRICING[category])} per day. Choose a vehicle below.`)
 
   for (const vehicle of vehicles) {
@@ -637,8 +650,9 @@ async function handleMessage(message: TelegramMessage) {
     })
 
     session = await saveSession(chatId, { step: 'completed', license_file_id: fileId })
-    await persistBooking(session, 'awaiting_payment_confirmation')
-    await sendMessage(chatId, 'Perfect. Atturo will confirm payment with you shortly.')
+    session = (await ensureCustomer(session)) ?? session
+    await persistBooking(session, 'pre_confirmation')
+    await sendMessage(chatId, 'Perfect. Cape Cars will confirm your booking shortly.')
     return
   }
 

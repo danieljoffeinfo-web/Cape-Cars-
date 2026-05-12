@@ -10,14 +10,14 @@ type ModalProps = {
   onSaved: () => void
 }
 
-const CATS = ['Track', 'Supercar', 'Grand Tourer', 'Electric', 'Daily'] as const
-const FUELS = ['Petrol', 'Hybrid', 'Electric'] as const
+const CATS = ['Luxury Vehicles', 'Mid Tier Vehicles', 'Large Vehicles'] as const
+const FUELS = ['Petrol', 'Hybrid', 'Electric', 'Diesel'] as const
 const STATUSES = ['Available', 'Booked', 'Service'] as const
 
 const emptyForm = () => ({
   id: '',
   model: '',
-  cat: 'Track' as const,
+  cat: 'Luxury Vehicles' as const,
   power: '',
   seats: 2,
   fuel: 'Petrol' as const,
