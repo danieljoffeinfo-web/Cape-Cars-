@@ -301,6 +301,16 @@ function parseDate(text: string) {
     const day = value.replace('next ', '').trim()
     if (day in weekdays) return nextWeekday(weekdays[day])
   }
+  if (value.startsWith('this ')) {
+    const day = value.replace('this ', '').trim()
+    if (day in weekdays) {
+      const now = new Date()
+      const date = new Date(now)
+      const diff = (weekdays[day] - now.getDay() + 7) % 7
+      date.setDate(now.getDate() + diff)
+      return toIsoDate(date)
+    }
+  }
 
   const slashMatch = value.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/)
   if (slashMatch) {
@@ -607,14 +617,14 @@ async function handleMessage(message: TelegramMessage) {
     })
     session = (await ensureCustomer(session)) ?? session
     await persistBooking(session, 'documents_pending')
-    await sendMessage(chatId, 'Please send a clear image of your ID.')
+    await sendMessage(chatId, 'Please send a clear image of your ID or passport.')
     return
   }
 
   if (session.step === 'awaiting_id_image') {
     const fileId = extractFileId(message)
     if (!fileId) {
-      await sendMessage(chatId, 'Please send a clear image of your ID.')
+      await sendMessage(chatId, 'Please send a clear image of your ID or passport.')
       return
     }
 
@@ -623,7 +633,7 @@ async function handleMessage(message: TelegramMessage) {
       customerId: session.customer_id ?? null,
       direction: 'inbound',
       messageType: 'photo',
-      body: 'Customer ID image uploaded',
+      body: 'Customer ID or passport image uploaded',
       meta: { fileId },
     })
 

@@ -219,7 +219,7 @@ export default function BookingsPage() {
                             <div>
                               <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Documents</div>
                               <div className="flex flex-col gap-1">
-                                {displayDoc(booking.id_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.id_file_id)!} target="_blank">View ID</a> : <span className="text-neutral-300">No ID</span>}
+                                {displayDoc(booking.id_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.id_file_id)!} target="_blank">View ID / passport</a> : <span className="text-neutral-300">No ID / passport</span>}
                                 {displayDoc(booking.license_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.license_file_id)!} target="_blank">View license</a> : <span className="text-neutral-300">No license</span>}
                               </div>
                             </div>
