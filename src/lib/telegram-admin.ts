@@ -461,6 +461,18 @@ export async function getVehiclesForCategory(category: string) {
   }
 }
 
+export type VehicleBlockedRange = {
+  startDate: string
+  endDate: string
+  source: 'telegram' | 'rental'
+  status: string
+}
+
+export type VehicleAvailabilityRow = VehicleRow & {
+  blockedRanges: VehicleBlockedRange[]
+  isBlocked: boolean
+}
+
 export async function getVehicleById(vehicleId: string) {
   const supabase = getAdminClient()
   if (!supabase) return null
@@ -481,6 +493,85 @@ export async function getVehicleById(vehicleId: string) {
   } catch (error) {
     console.error('getVehicleById exception', error)
     return null
+  }
+}
+
+function normalizeDate(value: string | null | undefined) {
+  return value ? new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) : null
+}
+
+export async function getVehiclesForCustomerCategory(category: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return []
+
+  try {
+    await releaseExpiredPendingBookings()
+
+    const [{ data: vehicles, error: vehiclesError }, { data: bookings, error: bookingsError }, { data: rentals, error: rentalsError }] = await Promise.all([
+      supabase
+        .from('vehicles')
+        .select('id, model, cat, rate, status, image_url, color, fuel, seats')
+        .eq('cat', category)
+        .order('sort_order', { ascending: true }),
+      supabase
+        .from('telegram_bookings')
+        .select('vehicle_name, start_date, end_date, status, created_at, hold_expires_at, released_at')
+        .eq('vehicle_category', category)
+        .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected']),
+      supabase
+        .from('rentals')
+        .select('vehicle_id, start_date, end_date, status')
+        .in('status', ['pending', 'confirmed'])
+    ])
+
+    if (vehiclesError || bookingsError || rentalsError) {
+      console.error('getVehiclesForCustomerCategory failed', { vehiclesError, bookingsError, rentalsError })
+      return []
+    }
+
+    const blockedByModel = new Map<string, VehicleBlockedRange[]>()
+    const blockedByVehicleId = new Map<string, VehicleBlockedRange[]>()
+
+    for (const booking of ((bookings ?? []) as any[])) {
+      if (!booking.vehicle_name || !booking.start_date || !booking.end_date) continue
+      if (!bookingHoldIsActive(booking)) continue
+      const existing = blockedByModel.get(booking.vehicle_name) ?? []
+      existing.push({
+        startDate: normalizeDate(booking.start_date)!,
+        endDate: normalizeDate(booking.end_date)!,
+        source: 'telegram',
+        status: booking.status,
+      })
+      blockedByModel.set(booking.vehicle_name, existing)
+    }
+
+    for (const rental of ((rentals ?? []) as any[])) {
+      if (!rental.vehicle_id || !rental.start_date || !rental.end_date) continue
+      const existing = blockedByVehicleId.get(rental.vehicle_id) ?? []
+      existing.push({
+        startDate: normalizeDate(rental.start_date)!,
+        endDate: normalizeDate(rental.end_date)!,
+        source: 'rental',
+        status: rental.status,
+      })
+      blockedByVehicleId.set(rental.vehicle_id, existing)
+    }
+
+    return ((vehicles ?? []) as VehicleRow[]).map((vehicle) => {
+      const blockedRanges = [
+        ...(blockedByVehicleId.get(vehicle.id) ?? []),
+        ...(blockedByModel.get(vehicle.model) ?? []),
+      ].sort((a, b) => a.startDate.localeCompare(b.startDate))
+
+      return {
+        ...vehicle,
+        blockedRanges,
+        isBlocked: blockedRanges.length > 0 || vehicle.status === 'Booked',
+      } satisfies VehicleAvailabilityRow
+    })
+  } catch (error) {
+    console.error('getVehiclesForCustomerCategory exception', error)
+    return []
   }
 }
 
@@ -578,6 +669,31 @@ export async function updateAllVehicleRatesByPercent(percent: number) {
     return { ok: true as const, count: vehicles.length }
   } catch (error) {
     return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+export async function hasTelegramConversationMarker(chatId: string, body: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return false
+
+  try {
+    const { data, error } = await supabase
+      .from('telegram_conversations')
+      .select('id')
+      .eq('chat_id', chatId)
+      .eq('body', body)
+      .limit(1)
+      .maybeSingle()
+
+    if (error) {
+      console.error('hasTelegramConversationMarker failed', error)
+      return false
+    }
+
+    return Boolean(data?.id)
+  } catch (error) {
+    console.error('hasTelegramConversationMarker exception', error)
+    return false
   }
 }
 

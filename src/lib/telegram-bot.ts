@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
-import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, type TelegramCatalogVehicle, type VehicleCategory } from '@/lib/telegram-catalog'
-import { buildTelegramProxyUrl, getAvailableVehiclesForCategory, getVehicleById, logTelegramConversation, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
+import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, type VehicleCategory } from '@/lib/telegram-catalog'
+import { buildTelegramProxyUrl, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
 import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
 
 type Locale = 'en' | 'ru'
@@ -38,6 +38,7 @@ export type BotSession = {
   total_amount?: number | null
   id_file_id?: string | null
   license_file_id?: string | null
+  blocked_ranges?: VehicleBlockedRange[]
   updated_at?: string
 }
 
@@ -71,6 +72,8 @@ type VehicleChoice = {
   status: string
   imageUrl: string
   source: 'db' | 'static'
+  blockedRanges: VehicleBlockedRange[]
+  isBlocked: boolean
 }
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
@@ -91,8 +94,8 @@ const CATEGORY_LABELS: Record<Locale, Record<VehicleCategory, string>> = {
 
 const TEXT = {
   welcome: {
-    en: '🚗 Welcome to Cape Cars Rentals. View our available vehicles below.',
-    ru: '🚗 Добро пожаловать в Cape Cars Rentals. Посмотрите доступные автомобили ниже.',
+    en: '⛰️ Welcome to Cape Cars Rentals. View our available vehicles below.',
+    ru: '⛰️ Добро пожаловать в Cape Cars Rentals. Посмотрите доступные автомобили ниже.',
   },
   chooseCategory: {
     en: 'Choose a vehicle category below.',
@@ -179,8 +182,16 @@ const TEXT = {
     ru: 'Автомобиль не найден',
   },
   noVehicles: {
-    en: 'There are no available vehicles in this category right now.',
-    ru: 'Сейчас в этой категории нет доступных автомобилей.',
+    en: 'There are no vehicles in this category right now.',
+    ru: 'Сейчас в этой категории нет автомобилей.',
+  },
+  bookedDatesNotice: {
+    en: (model: string, ranges: string) => `${model} is booked for these dates: ${ranges}. You can still book this vehicle outside those dates. What starting date would you like?`,
+    ru: (model: string, ranges: string) => `${model} забронирован на эти даты: ${ranges}. Вы всё равно можете забронировать этот автомобиль вне этих дат. С какой даты вы хотите начать?`,
+  },
+  bookedRangeConflict: {
+    en: (model: string, ranges: string) => `${model} is booked for these dates: ${ranges}. Please choose a different starting date so your booking does not overlap.`,
+    ru: (model: string, ranges: string) => `${model} забронирован на эти даты: ${ranges}. Пожалуйста, выберите другую дату начала, чтобы бронирование не пересекалось.`,
   },
 } as const
 
@@ -205,6 +216,7 @@ function defaultSession(chatId: string): BotSession {
     total_amount: null,
     id_file_id: null,
     license_file_id: null,
+    blocked_ranges: [],
     updated_at: new Date().toISOString(),
   }
 }
@@ -360,8 +372,26 @@ function vehiclesForCategory(category: VehicleCategory) {
   return TELEGRAM_CATALOG.filter((vehicle) => vehicle.category === category)
 }
 
-async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static'): Promise<VehicleChoice | null> {
+async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', categoryHint?: VehicleCategory | null): Promise<VehicleChoice | null> {
   if (source === 'db') {
+    if (categoryHint) {
+      const vehicles = await getVehiclesForCustomerCategory(categoryHint)
+      const matched = vehicles.find((vehicle) => vehicle.id === vehicleId)
+      if (matched) {
+        return {
+          id: matched.id,
+          model: matched.model,
+          category: matched.cat as VehicleCategory,
+          rate: matched.rate,
+          status: matched.status,
+          imageUrl: matched.image_url || '',
+          source: 'db',
+          blockedRanges: matched.blockedRanges,
+          isBlocked: matched.isBlocked,
+        }
+      }
+    }
+
     const vehicle = await getVehicleById(vehicleId)
     if (!vehicle) return null
     return {
@@ -372,6 +402,8 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static'):
       status: vehicle.status,
       imageUrl: vehicle.image_url || '',
       source: 'db',
+      blockedRanges: [],
+      isBlocked: vehicle.status === 'Booked',
     }
   }
 
@@ -385,7 +417,17 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static'):
     status: vehicle.status,
     imageUrl: vehicle.imageUrl,
     source: 'static',
+    blockedRanges: [],
+    isBlocked: vehicle.status === 'Booked',
   }
+}
+
+function formatBlockedRanges(ranges: VehicleBlockedRange[]) {
+  return ranges.map((range) => `${range.startDate} → ${range.endDate}`).join(', ')
+}
+
+function datesOverlap(startA: string, endA: string, startB: string, endB: string) {
+  return startA <= endB && endA >= startB
 }
 
 function formatVehicleCaption(vehicle: VehicleChoice, locale: Locale) {
@@ -399,7 +441,7 @@ function formatVehicleCaption(vehicle: VehicleChoice, locale: Locale) {
 async function sendWelcome(chatId: string) {
   await sendMessage(
     chatId,
-    `${TEXT.welcome.en}\n${TEXT.welcome.ru}`,
+    `${TEXT.welcome.en}\n\n\n${TEXT.welcome.ru}`,
     getLanguageButtons(),
   )
 }
@@ -409,7 +451,7 @@ async function sendCategoryPrompt(chatId: string, locale: Locale) {
 }
 
 async function sendCategoryCatalog(chatId: string, category: VehicleCategory, locale: Locale) {
-  const liveVehicles = await getAvailableVehiclesForCategory(category)
+  const liveVehicles = await getVehiclesForCustomerCategory(category)
   const vehicles: VehicleChoice[] = (liveVehicles && liveVehicles.length > 0)
     ? liveVehicles
       .filter((vehicle) => vehicle.image_url)
@@ -421,9 +463,10 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory, lo
         status: vehicle.status,
         imageUrl: vehicle.image_url || '',
         source: 'db' as const,
+        blockedRanges: vehicle.blockedRanges,
+        isBlocked: vehicle.isBlocked,
       }))
     : vehiclesForCategory(category)
-      .filter((vehicle) => vehicle.status === 'Available')
       .map((vehicle) => ({
         id: vehicle.id,
         model: vehicle.model,
@@ -432,6 +475,8 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory, lo
         status: vehicle.status,
         imageUrl: vehicle.imageUrl,
         source: 'static' as const,
+        blockedRanges: [],
+        isBlocked: vehicle.status === 'Booked',
       }))
 
   if (vehicles.length === 0) {
@@ -681,6 +726,7 @@ async function handleCategorySelect(callback: CallbackQuery, category: VehicleCa
     total_amount: null,
     id_file_id: null,
     license_file_id: null,
+    blocked_ranges: [],
   })
 
   await answerCallbackQuery(callback.id, CATEGORY_LABELS[locale][category])
@@ -693,7 +739,7 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
 
   const session = await getSession(chatId)
   const locale = t(session.locale)
-  const vehicle = await resolveVehicleChoice(vehicleId, source)
+  const vehicle = await resolveVehicleChoice(vehicleId, source, session.selected_category)
   if (!vehicle) {
     await answerCallbackQuery(callback.id, TEXT.vehicleNotFound[locale])
     await sendWelcome(chatId)
@@ -720,6 +766,7 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
     customer_phone: null,
     id_file_id: null,
     license_file_id: null,
+    blocked_ranges: vehicle.blockedRanges,
   })
 
   next = (await ensureCustomer(next)) ?? next
@@ -727,7 +774,11 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
 
   await answerCallbackQuery(callback.id, TEXT.bookingVehicle[locale](vehicle.model))
   await sendMessage(chatId, TEXT.bookingVehicle[locale](vehicle.model))
-  await sendMessage(chatId, TEXT.askStartDate[locale])
+  if (vehicle.blockedRanges.length > 0) {
+    await sendMessage(chatId, TEXT.bookedDatesNotice[locale](vehicle.model, formatBlockedRanges(vehicle.blockedRanges)))
+  } else {
+    await sendMessage(chatId, TEXT.askStartDate[locale])
+  }
 }
 
 async function handleCallback(callback: CallbackQuery) {
@@ -802,6 +853,7 @@ async function handleCallback(callback: CallbackQuery) {
       customer_phone: null,
       id_file_id: null,
       license_file_id: null,
+      blocked_ranges: [],
     })
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Другие автомобили' : 'Other vehicles')
     await sendCategoryPrompt(chatId, locale)
@@ -851,6 +903,13 @@ async function handleMessage(message: TelegramMessage) {
       return
     }
 
+    const blockedRanges = session.blocked_ranges ?? []
+    const startBlocked = blockedRanges.some((range) => startDate >= range.startDate && startDate <= range.endDate)
+    if (startBlocked) {
+      await sendMessage(chatId, TEXT.bookedRangeConflict[locale](session.selected_vehicle_model || 'This vehicle', formatBlockedRanges(blockedRanges)))
+      return
+    }
+
     session = await saveSession(chatId, {
       step: 'awaiting_days',
       requested_start_date: startDate,
@@ -871,6 +930,19 @@ async function handleMessage(message: TelegramMessage) {
 
     const totalAmount = (session.daily_rate ?? 0) * days
     const endDate = addDays(session.requested_start_date!, days)
+    const blockedRanges = session.blocked_ranges ?? []
+    const overlapsBlockedRange = blockedRanges.some((range) => datesOverlap(session.requested_start_date!, endDate, range.startDate, range.endDate))
+
+    if (overlapsBlockedRange) {
+      await saveSession(chatId, {
+        step: 'awaiting_start_date',
+        requested_days: null,
+        requested_end_date: null,
+        total_amount: null,
+      })
+      await sendMessage(chatId, TEXT.bookedRangeConflict[locale](session.selected_vehicle_model || 'This vehicle', formatBlockedRanges(blockedRanges)))
+      return
+    }
 
     session = await saveSession(chatId, {
       step: 'awaiting_confirmation',
