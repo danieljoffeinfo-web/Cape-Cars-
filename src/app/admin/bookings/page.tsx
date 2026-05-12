@@ -16,6 +16,9 @@ type TelegramBooking = {
   total_amount: number | null
   id_file_id: string | null
   license_file_id: string | null
+  booking_code?: string | null
+  hold_expires_at?: string | null
+  released_at?: string | null
   status: string
   created_at: string
   updated_at: string
@@ -27,17 +30,18 @@ type TelegramBooking = {
   } | null
 }
 
-const STATUS_OPTIONS = ['pending', 'confirmed_booking', 'confirmed', 'cancelled'] as const
+const STATUS_OPTIONS = ['pending', 'confirmed_booking', 'confirmed', 'cancelled', 'expired'] as const
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700 border-amber-200',
   confirmed_booking: 'bg-blue-50 text-blue-700 border-blue-200',
   confirmed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   cancelled: 'bg-red-50 text-red-600 border-red-200',
+  expired: 'bg-neutral-100 text-neutral-500 border-neutral-200',
 }
 
-function bookingCode(id: string) {
-  return `CC-${id.slice(0, 8).toUpperCase()}`
+function bookingCode(id: string, code?: string | null) {
+  return `CC-${(code || id.slice(0, 8)).toUpperCase()}`
 }
 
 function displayDoc(value: string | null) {
@@ -45,8 +49,8 @@ function displayDoc(value: string | null) {
   return value.startsWith('/api/') ? value : `/api/telegram/file/${encodeURIComponent(value)}`
 }
 
-function pendingUntil(createdAt: string) {
-  return new Date(new Date(createdAt).getTime() + 24 * 60 * 60 * 1000)
+function pendingUntil(createdAt: string, holdExpiresAt?: string | null) {
+  return new Date(holdExpiresAt || new Date(new Date(createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString())
 }
 
 export default function BookingsPage() {
@@ -120,6 +124,7 @@ export default function BookingsPage() {
     confirmed_booking: bookings.filter((booking) => booking.status === 'confirmed_booking').length,
     confirmed: bookings.filter((booking) => booking.status === 'confirmed').length,
     cancelled: bookings.filter((booking) => booking.status === 'cancelled').length,
+    expired: bookings.filter((booking) => booking.status === 'expired').length,
   }), [bookings])
 
   const filtered = filterStatus === 'all' ? bookings : bookings.filter((booking) => booking.status === filterStatus)
@@ -139,6 +144,7 @@ export default function BookingsPage() {
           { label: 'Confirmed booking', value: counts.confirmed_booking },
           { label: 'Payment collected', value: counts.confirmed },
           { label: 'Cancelled', value: counts.cancelled },
+          { label: 'Expired', value: counts.expired },
         ].map((card) => (
           <div key={card.label} className="bg-white rounded-2xl p-4 border border-black/[0.06]">
             <div className="text-[10px] tracking-[0.25em] uppercase text-neutral-400">{card.label}</div>
@@ -183,13 +189,13 @@ export default function BookingsPage() {
               </thead>
               <tbody className="divide-y divide-black/[0.04]">
                 {filtered.map((booking) => {
-                  const holdUntil = pendingUntil(booking.created_at)
+                  const holdUntil = pendingUntil(booking.created_at, booking.hold_expires_at)
                   const holdExpired = booking.status === 'pending' && holdUntil.getTime() < Date.now()
 
                   return (
                     <>
                       <tr key={booking.id} className="hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setExpandedId(expandedId === booking.id ? null : booking.id)}>
-                        <td className="px-5 py-4 font-medium text-neutral-900">{bookingCode(booking.id)}</td>
+                        <td className="px-5 py-4 font-medium text-neutral-900">{bookingCode(booking.id, booking.booking_code)}</td>
                         <td className="px-5 py-4">
                           <div className="font-medium text-neutral-900">{booking.telegram_customers?.full_name || booking.telegram_customers?.telegram_name || 'Unnamed customer'}</div>
                           <div className="text-xs text-neutral-400 mt-0.5">{booking.telegram_customers?.phone || booking.chat_id}</div>
@@ -216,7 +222,7 @@ export default function BookingsPage() {
                             <div className="grid gap-4 md:grid-cols-4 text-sm">
                               <div>
                                 <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Booking code</div>
-                                <div className="text-neutral-700">{bookingCode(booking.id)}</div>
+                                <div className="text-neutral-700">{bookingCode(booking.id, booking.booking_code)}</div>
                               </div>
                               <div>
                                 <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Rental window</div>

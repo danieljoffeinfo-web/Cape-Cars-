@@ -46,6 +46,9 @@ export type TelegramBookingWithCustomer = {
   total_amount: number | null
   id_file_id: string | null
   license_file_id: string | null
+  booking_code?: string | null
+  hold_expires_at?: string | null
+  released_at?: string | null
   status: string
   created_at: string
   updated_at: string
@@ -97,13 +100,15 @@ function publicBaseUrl() {
   return fromEnv.startsWith('http') ? fromEnv : `https://${fromEnv}`
 }
 
-function hoursSince(value: string) {
-  return (Date.now() - new Date(value).getTime()) / (1000 * 60 * 60)
-}
-
-function bookingHoldIsActive(booking: { status: string, created_at: string }) {
+function bookingHoldIsActive(booking: { status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }) {
+  if (booking.released_at) return false
   if (['confirmed_booking', 'confirmed', 'payment_collected'].includes(booking.status)) return true
-  if (['pending', 'pre_confirmation'].includes(booking.status)) return hoursSince(booking.created_at) <= HOLD_WINDOW_HOURS
+  if (['pending', 'pre_confirmation'].includes(booking.status)) {
+    const expiresAt = booking.hold_expires_at
+      ? new Date(booking.hold_expires_at).getTime()
+      : new Date(booking.created_at).getTime() + (HOLD_WINDOW_HOURS * 60 * 60 * 1000)
+    return expiresAt > Date.now()
+  }
   return false
 }
 
@@ -117,6 +122,16 @@ export function buildAbsoluteTelegramProxyUrl(fileId: string) {
 
 export function pendingHoldExpiresAt(createdAt: string) {
   return new Date(new Date(createdAt).getTime() + HOLD_WINDOW_HOURS * 60 * 60 * 1000).toISOString()
+}
+
+function deriveBookingCode(bookingId: string) {
+  return bookingId.replace(/-/g, '').slice(0, 8).toUpperCase()
+}
+
+function deriveHoldExpiresAt(status?: string | null) {
+  return ['pending', 'pre_confirmation'].includes(status ?? '')
+    ? new Date(Date.now() + HOLD_WINDOW_HOURS * 60 * 60 * 1000).toISOString()
+    : null
 }
 
 export async function upsertTelegramCustomer(input: TelegramCustomerUpsert) {
@@ -207,6 +222,9 @@ export async function upsertTelegramBooking(input: TelegramBookingUpsert) {
       total_amount: input.totalAmount ?? null,
       id_file_id: input.idFileId ?? null,
       license_file_id: input.licenseFileId ?? null,
+      booking_code: deriveBookingCode(input.bookingId),
+      hold_expires_at: deriveHoldExpiresAt(input.status ?? 'draft'),
+      released_at: null,
       status: input.status ?? 'draft',
       updated_at: new Date().toISOString(),
     }
@@ -257,9 +275,15 @@ export async function updateTelegramBookingStatus(bookingId: string, status: str
   if (!supabase) return null
 
   try {
+    const releaseStatuses = ['expired', 'cancelled']
     const { data, error } = await supabase
       .from('telegram_bookings')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({
+        status,
+        hold_expires_at: deriveHoldExpiresAt(status),
+        released_at: releaseStatuses.includes(status) ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', bookingId)
       .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
       .single()
@@ -276,11 +300,53 @@ export async function updateTelegramBookingStatus(bookingId: string, status: str
   }
 }
 
+export async function releaseExpiredPendingBookings() {
+  const supabase = getAdminClient()
+  if (!supabase) return 0
+
+  try {
+    const nowIso = new Date().toISOString()
+
+    const { data, error } = await supabase
+      .from('telegram_bookings')
+      .select('id, created_at, hold_expires_at, status, released_at')
+      .in('status', ['pending', 'pre_confirmation'])
+
+    if (error) {
+      console.error('releaseExpiredPendingBookings failed', error)
+      return 0
+    }
+
+    const expiredIds = ((data ?? []) as Array<{ id: string, created_at: string, hold_expires_at?: string | null, status: string, released_at?: string | null }>)
+      .filter((booking) => !bookingHoldIsActive(booking) && !booking.released_at)
+      .map((booking) => booking.id)
+
+    if (expiredIds.length === 0) return 0
+
+    const { error: updateError } = await supabase
+      .from('telegram_bookings')
+      .update({ status: 'expired', released_at: nowIso, updated_at: nowIso })
+      .in('id', expiredIds)
+
+    if (updateError) {
+      console.error('releaseExpiredPendingBookings update failed', updateError)
+      return 0
+    }
+
+    return expiredIds.length
+  } catch (error) {
+    console.error('releaseExpiredPendingBookings exception', error)
+    return 0
+  }
+}
+
 export async function getAvailableVehiclesForCategory(category: string) {
   const supabase = getAdminClient()
   if (!supabase) return null
 
   try {
+    await releaseExpiredPendingBookings()
+
     const [{ data: vehicles, error: vehiclesError }, { data: bookings, error: bookingsError }] = await Promise.all([
       supabase
         .from('vehicles')
@@ -290,7 +356,7 @@ export async function getAvailableVehiclesForCategory(category: string) {
         .order('sort_order', { ascending: true }),
       supabase
         .from('telegram_bookings')
-        .select('vehicle_name, status, created_at')
+        .select('vehicle_name, status, created_at, hold_expires_at, released_at')
         .eq('vehicle_category', category)
         .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected']),
     ])
@@ -305,7 +371,7 @@ export async function getAvailableVehiclesForCategory(category: string) {
     }
 
     const blockedModels = new Set(
-      ((bookings ?? []) as { vehicle_name: string | null, status: string, created_at: string }[])
+      ((bookings ?? []) as { vehicle_name: string | null, status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }[])
         .filter((booking) => booking.vehicle_name && bookingHoldIsActive(booking))
         .map((booking) => booking.vehicle_name as string),
     )
@@ -465,6 +531,8 @@ export async function getTelegramBookingsForRange(range: 'week' | 'month' | 'thr
   if (!supabase) return []
 
   try {
+    await releaseExpiredPendingBookings()
+
     const { data, error } = await supabase
       .from('telegram_bookings')
       .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
