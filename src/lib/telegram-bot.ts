@@ -10,7 +10,7 @@ export type SessionStep =
   | 'choosing_category'
   | 'choosing_vehicle'
   | 'awaiting_start_date'
-  | 'awaiting_days'
+  | 'awaiting_end_date'
   | 'awaiting_confirmation'
   | 'awaiting_full_name'
   | 'awaiting_phone'
@@ -54,7 +54,7 @@ type CallbackQuery = {
   id: string
   data?: string
   from?: { first_name?: string; last_name?: string; username?: string }
-  message?: { chat: { id: number | string } }
+  message?: { chat: { id: number | string }; message_id?: number }
 }
 
 export type TelegramUpdate = {
@@ -92,6 +92,17 @@ const CATEGORY_LABELS: Record<Locale, Record<VehicleCategory, string>> = {
   },
 }
 
+const MONTH_NAMES: Record<Locale, string[]> = {
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  ru: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
+}
+
+// Week starts Monday
+const DAY_NAMES: Record<Locale, string[]> = {
+  en: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
+  ru: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
+}
+
 const TEXT = {
   welcome: {
     en: '⛰️ Welcome to Cape Cars Rentals. View our available vehicles below.',
@@ -113,21 +124,13 @@ const TEXT = {
     en: (model: string) => `Book ${model}`,
     ru: (model: string) => `Забронировать ${model}`,
   },
-  askStartDate: {
-    en: 'What starting date would you like to book the vehicle?',
-    ru: 'С какой даты вы хотите забронировать автомобиль?',
+  calendarStart: {
+    en: (model: string) => `📅 ${model}\n\nSelect your start date.\n✖ = already booked`,
+    ru: (model: string) => `📅 ${model}\n\nВыберите дату начала аренды.\n✖ = уже забронировано`,
   },
-  badStartDate: {
-    en: 'Please send the starting date for the booking.',
-    ru: 'Пожалуйста, отправьте дату начала бронирования.',
-  },
-  askDays: {
-    en: (model: string, date: string) => `Great. ${model} is set for ${date}. For how many days would you like to book it?`,
-    ru: (model: string, date: string) => `Отлично. ${model} выбран с ${date}. На сколько дней вы хотите его забронировать?`,
-  },
-  badDays: {
-    en: 'Please send how many days you would like to book for.',
-    ru: 'Пожалуйста, отправьте количество дней для бронирования.',
+  calendarEnd: {
+    en: (startDate: string) => `📅 Start date: ${startDate}\n\nNow select your return date.\n✖ = already booked`,
+    ru: (startDate: string) => `📅 Дата начала: ${startDate}\n\nВыберите дату возврата.\n✖ = уже забронировано`,
   },
   confirmSummary: {
     en: (model: string, dailyRate: number, days: number, totalAmount: number, startDate: string, endDate: string) => [
@@ -166,16 +169,12 @@ const TEXT = {
     ru: 'Спасибо. Теперь отправьте чёткое фото водительского удостоверения.',
   },
   done: {
-    en: (bookingCode: string) => `Perfect. Your booking request ${bookingCode} has been sent to Cape Cars and is now pending confirmation for 24 hours. We’ll confirm it with you shortly.`,
+    en: (bookingCode: string) => `Perfect. Your booking request ${bookingCode} has been sent to Cape Cars and is now pending confirmation for 24 hours. We'll confirm it with you shortly.`,
     ru: (bookingCode: string) => `Отлично. Ваша заявка ${bookingCode} отправлена в Cape Cars и сейчас ожидает подтверждения в течение 24 часов. Мы скоро свяжемся с вами для подтверждения.`,
   },
   alreadyCompleted: {
-    en: (bookingCode: string) => `Your booking request ${bookingCode} is already pending with Cape Cars. We’ll confirm it with you shortly. Send /start only if you want to begin a new booking.`,
+    en: (bookingCode: string) => `Your booking request ${bookingCode} is already pending with Cape Cars. We'll confirm it with you shortly. Send /start only if you want to begin a new booking.`,
     ru: (bookingCode: string) => `Ваша заявка ${bookingCode} уже ожидает подтверждения в Cape Cars. Мы скоро свяжемся с вами. Отправьте /start, только если хотите начать новое бронирование.`,
-  },
-  restartDate: {
-    en: 'No problem. Please send a new starting date.',
-    ru: 'Без проблем. Пожалуйста, отправьте новую дату начала.',
   },
   vehicleNotFound: {
     en: 'Vehicle not found',
@@ -184,14 +183,6 @@ const TEXT = {
   noVehicles: {
     en: 'There are no vehicles in this category right now.',
     ru: 'Сейчас в этой категории нет автомобилей.',
-  },
-  bookedDatesNotice: {
-    en: (model: string, ranges: string) => `${model} is booked for these dates: ${ranges}. You can still book this vehicle outside those dates. What starting date would you like?`,
-    ru: (model: string, ranges: string) => `${model} забронирован на эти даты: ${ranges}. Вы всё равно можете забронировать этот автомобиль вне этих дат. С какой даты вы хотите начать?`,
-  },
-  bookedRangeConflict: {
-    en: (model: string, ranges: string) => `${model} is booked for these dates: ${ranges}. Please choose a different starting date so your booking does not overlap.`,
-    ru: (model: string, ranges: string) => `${model} забронирован на эти даты: ${ranges}. Пожалуйста, выберите другую дату начала, чтобы бронирование не пересекалось.`,
   },
 } as const
 
@@ -328,6 +319,15 @@ async function sendMessage(chatId: string, text: string, buttons?: TelegramInlin
   })
 }
 
+async function editMessage(chatId: string, messageId: number, text: string, buttons?: TelegramInlineButton[][]) {
+  await telegramApi('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+  })
+}
+
 async function sendPhoto(chatId: string, photo: string, caption: string, buttons?: TelegramInlineButton[][]) {
   const session = await getSession(chatId)
   await telegramApi('sendPhoto', {
@@ -422,10 +422,6 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
   }
 }
 
-function formatBlockedRanges(ranges: VehicleBlockedRange[]) {
-  return ranges.map((range) => `${range.startDate} → ${range.endDate}`).join(', ')
-}
-
 function datesOverlap(startA: string, endA: string, startB: string, endB: string) {
   return startA <= endB && endA >= startB
 }
@@ -436,6 +432,84 @@ function formatVehicleCaption(vehicle: VehicleChoice, locale: Locale) {
     `${CATEGORY_LABELS[locale][vehicle.category]}`,
     locale === 'ru' ? `Ставка в день: ${formatCurrency(vehicle.rate)}` : `Daily rate: ${formatCurrency(vehicle.rate)}`,
   ].join('\n')
+}
+
+function toIsoDate(date: Date) {
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())).toISOString().slice(0, 10)
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+// Builds an inline keyboard calendar grid for the given month.
+// Blocked dates show as ✖ and are non-interactive.
+// For end-date mode, dates on/before startDate and dates that would
+// create an overlap with a blocked range are also non-interactive (·).
+function buildCalendarKeyboard(
+  year: number,
+  month: number, // 0-indexed
+  blockedRanges: VehicleBlockedRange[],
+  mode: 'start' | 'end',
+  locale: Locale,
+  startDate?: string | null,
+): TelegramInlineButton[][] {
+  const today = toIsoDate(new Date())
+  const monthStr = pad2(month + 1)
+  const currentYM = today.slice(0, 7)
+  const thisYM = `${year}-${monthStr}`
+
+  const prevD = new Date(year, month - 1, 1)
+  const nextD = new Date(year, month + 1, 1)
+  const prevYM = `${prevD.getFullYear()}-${pad2(prevD.getMonth() + 1)}`
+  const nextYM = `${nextD.getFullYear()}-${pad2(nextD.getMonth() + 1)}`
+  const canPrev = prevYM >= currentYM
+
+  const header: TelegramInlineButton[] = [
+    { text: canPrev ? '‹' : ' ', callback_data: canPrev ? `cal:nav:${mode}:${prevYM}` : 'cal:noop' },
+    { text: `${MONTH_NAMES[locale][month]} ${year}`, callback_data: 'cal:noop' },
+    { text: '›', callback_data: `cal:nav:${mode}:${nextYM}` },
+  ]
+
+  const dayRow: TelegramInlineButton[] = DAY_NAMES[locale].map((d) => ({ text: d, callback_data: 'cal:noop' }))
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  // Offset: getDay() returns 0=Sun..6=Sat; convert to Mon=0..Sun=6
+  const firstDow = (new Date(year, month, 1).getDay() + 6) % 7
+
+  const cells: Array<number | null> = []
+  for (let i = 0; i < firstDow; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+
+  const rows: TelegramInlineButton[][] = []
+  for (let i = 0; i < cells.length; i += 7) {
+    const row: TelegramInlineButton[] = []
+    for (let j = 0; j < 7; j++) {
+      const day = cells[i + j] ?? null
+      if (day === null) {
+        row.push({ text: ' ', callback_data: 'cal:noop' })
+        continue
+      }
+
+      const dateStr = `${year}-${monthStr}-${pad2(day)}`
+      const isPast = thisYM < currentYM || dateStr < today
+      const isBlocked = blockedRanges.some((r) => dateStr >= r.startDate && dateStr <= r.endDate)
+      const isBeforeOrOnStart = mode === 'end' && startDate != null && dateStr <= startDate
+      const wouldOverlap = mode === 'end' && startDate != null
+        && blockedRanges.some((r) => datesOverlap(startDate, dateStr, r.startDate, r.endDate))
+
+      const disabled = isPast || isBlocked || isBeforeOrOnStart || wouldOverlap
+
+      row.push({
+        text: isBlocked ? '✖' : disabled ? '·' : String(day),
+        callback_data: disabled ? 'cal:noop' : `cal:select:${dateStr}`,
+      })
+    }
+    while (row.length < 7) row.push({ text: ' ', callback_data: 'cal:noop' })
+    rows.push(row)
+  }
+
+  return [header, dayRow, ...rows]
 }
 
 async function sendWelcome(chatId: string) {
@@ -496,196 +570,6 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory, lo
       [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
     )
   }
-}
-
-function toIsoDate(date: Date) {
-  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())).toISOString().slice(0, 10)
-}
-
-function nextWeekday(targetDay: number, allowSameDay = false) {
-  const now = new Date()
-  const date = new Date(now)
-  let diff = (targetDay - now.getDay() + 7) % 7
-  if (!allowSameDay && diff === 0) diff = 7
-  date.setDate(now.getDate() + diff)
-  return toIsoDate(date)
-}
-
-function parseDate(text: string) {
-  const original = text.trim().toLowerCase().replace(/,/g, ' ')
-  if (!original) return null
-
-  let value = original
-    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/g, '$1')
-    .replace(/\bof\b/g, ' ')
-    .replace(/\bна\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  const replacements: Record<string, string> = {
-    'понедельник': 'monday',
-    'вторник': 'tuesday',
-    'среда': 'wednesday',
-    'четверг': 'thursday',
-    'пятница': 'friday',
-    'суббота': 'saturday',
-    'воскресенье': 'sunday',
-    'следующий ': 'next ',
-    'следующую ': 'next ',
-    'эта ': 'this ',
-    'этот ': 'this ',
-    'сегодня': 'today',
-    'завтра': 'tomorrow',
-    'января': 'january',
-    'февраля': 'february',
-    'марта': 'march',
-    'апреля': 'april',
-    'мая': 'may',
-    'июня': 'june',
-    'июля': 'july',
-    'августа': 'august',
-    'сентября': 'september',
-    'октября': 'october',
-    'ноября': 'november',
-    'декабря': 'december',
-  }
-
-  for (const [from, to] of Object.entries(replacements)) {
-    value = value.replaceAll(from, to)
-  }
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const date = new Date(`${value}T00:00:00Z`)
-    return Number.isNaN(date.getTime()) ? null : value
-  }
-
-  if (value === 'today') return toIsoDate(new Date())
-  if (value === 'tomorrow') {
-    const date = new Date()
-    date.setDate(date.getDate() + 1)
-    return toIsoDate(date)
-  }
-
-  const weekdays: Record<string, number> = {
-    sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
-  }
-
-  if (value in weekdays) return nextWeekday(weekdays[value])
-  if (value.startsWith('next ')) {
-    const day = value.replace('next ', '').trim()
-    if (day in weekdays) return nextWeekday(weekdays[day])
-  }
-  if (value.startsWith('this ')) {
-    const day = value.replace('this ', '').trim()
-    if (day in weekdays) return nextWeekday(weekdays[day], true)
-  }
-
-  const slashMatch = value.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/)
-  if (slashMatch) {
-    const [, d, m, y] = slashMatch
-    const year = y ? Number(y.length === 2 ? `20${y}` : y) : new Date().getFullYear()
-    const date = new Date(year, Number(m) - 1, Number(d))
-    return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
-  }
-
-  if (/^\d{1,2}$/.test(value)) {
-    const today = new Date()
-    const day = Number(value)
-    let candidate = new Date(today.getFullYear(), today.getMonth(), day)
-    const floorToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-    if (candidate.getDate() !== day || candidate < floorToday) {
-      candidate = new Date(today.getFullYear(), today.getMonth() + 1, day)
-    }
-    return Number.isNaN(candidate.getTime()) ? null : toIsoDate(candidate)
-  }
-
-  const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december']
-  const directDayMonth = value.match(/^(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?$/)
-  if (directDayMonth && monthNames.includes(directDayMonth[2])) {
-    const day = Number(directDayMonth[1])
-    const month = monthNames.indexOf(directDayMonth[2])
-    const year = directDayMonth[3] ? Number(directDayMonth[3]) : new Date().getFullYear()
-    const date = new Date(year, month, day)
-    return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
-  }
-
-  const directMonthDay = value.match(/^([a-z]+)\s+(\d{1,2})(?:\s+(\d{4}))?$/)
-  if (directMonthDay && monthNames.includes(directMonthDay[1])) {
-    const month = monthNames.indexOf(directMonthDay[1])
-    const day = Number(directMonthDay[2])
-    const year = directMonthDay[3] ? Number(directMonthDay[3]) : new Date().getFullYear()
-    const date = new Date(year, month, day)
-    return Number.isNaN(date.getTime()) ? null : toIsoDate(date)
-  }
-
-  const natural = new Date(value)
-  if (!Number.isNaN(natural.getTime())) return toIsoDate(natural)
-  return null
-}
-
-function parseRentalDays(text: string) {
-  const raw = text.trim().toLowerCase()
-  if (!raw) return null
-
-  let value = raw
-  const replacements: Record<string, string> = {
-    'одна': 'one',
-    'один': 'one',
-    'два': 'two',
-    'три': 'three',
-    'четыре': 'four',
-    'пять': 'five',
-    'шесть': 'six',
-    'семь': 'seven',
-    'восемь': 'eight',
-    'девять': 'nine',
-    'десять': 'ten',
-    'одиннадцать': 'eleven',
-    'двенадцать': 'twelve',
-    'тринадцать': 'thirteen',
-    'четырнадцать': 'fourteen',
-    'неделя': 'week',
-    'недели': 'weeks',
-    'недель': 'weeks',
-    'день': 'day',
-    'дня': 'days',
-    'дней': 'days',
-  }
-  for (const [from, to] of Object.entries(replacements)) {
-    value = value.replaceAll(from, to)
-  }
-
-  const wordNumbers: Record<string, number> = {
-    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
-    eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
-  }
-
-  const weekWord = value.match(/\b(one|two|three|four)\s+week(s)?\b/)
-  if (weekWord) return (wordNumbers[weekWord[1]] ?? 0) * 7
-
-  const dayWord = value.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen)\s+day(s)?\b/)
-  if (dayWord) return wordNumbers[dayWord[1]] ?? null
-
-  if (value === 'a week' || value === 'one week') return 7
-  if (value === 'weekend') return 2
-
-  const weekDigits = value.match(/(\d{1,2})\s*week(s)?/)
-  if (weekDigits) {
-    const weeks = Number.parseInt(weekDigits[1], 10)
-    if (weeks > 0 && weeks <= 4) return weeks * 7
-  }
-
-  const digits = value.match(/(\d{1,2})/)
-  if (!digits) return null
-  const days = Number.parseInt(digits[1], 10)
-  if (!Number.isFinite(days) || days <= 0 || days > 30) return null
-  return days
-}
-
-function addDays(startDate: string, days: number) {
-  const date = new Date(`${startDate}T00:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
 }
 
 function extractFileId(message?: TelegramMessage): string | null {
@@ -773,12 +657,10 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
   await persistBooking(next, 'draft')
 
   await answerCallbackQuery(callback.id, TEXT.bookingVehicle[locale](vehicle.model))
-  await sendMessage(chatId, TEXT.bookingVehicle[locale](vehicle.model))
-  if (vehicle.blockedRanges.length > 0) {
-    await sendMessage(chatId, TEXT.bookedDatesNotice[locale](vehicle.model, formatBlockedRanges(vehicle.blockedRanges)))
-  } else {
-    await sendMessage(chatId, TEXT.askStartDate[locale])
-  }
+
+  const now = new Date()
+  const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), vehicle.blockedRanges, 'start', locale)
+  await sendMessage(chatId, TEXT.calendarStart[locale](vehicle.model), keyboard)
 }
 
 async function handleCallback(callback: CallbackQuery) {
@@ -810,6 +692,106 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
+  // Calendar: no-op (blocked/past/disabled dates)
+  if (data === 'cal:noop') {
+    await answerCallbackQuery(callback.id)
+    return
+  }
+
+  // Calendar: user tapped a date
+  if (data.startsWith('cal:select:')) {
+    const selectedDate = data.slice('cal:select:'.length)
+    const session = await getSession(chatId)
+    const locale = t(session.locale)
+
+    await answerCallbackQuery(callback.id)
+    await logInboundText(chatId, `Selected date: ${selectedDate}`, 'button')
+
+    if (session.step === 'awaiting_start_date') {
+      const next = await saveSession(chatId, {
+        step: 'awaiting_end_date',
+        requested_start_date: selectedDate,
+        requested_days: null,
+        requested_end_date: null,
+        total_amount: null,
+      })
+      await persistBooking(next, 'draft')
+
+      const [yr, mo] = selectedDate.split('-').map(Number)
+      const keyboard = buildCalendarKeyboard(yr, mo - 1, next.blocked_ranges ?? [], 'end', locale, selectedDate)
+      await sendMessage(chatId, TEXT.calendarEnd[locale](selectedDate), keyboard)
+      return
+    }
+
+    if (session.step === 'awaiting_end_date') {
+      const startDate = session.requested_start_date!
+      const msPerDay = 1000 * 60 * 60 * 24
+      const days = Math.round((new Date(selectedDate).getTime() - new Date(startDate).getTime()) / msPerDay)
+      const totalAmount = (session.daily_rate ?? 0) * days
+
+      const next = await saveSession(chatId, {
+        step: 'awaiting_confirmation',
+        requested_end_date: selectedDate,
+        requested_days: days,
+        total_amount: totalAmount,
+      })
+      await persistBooking(next, 'quote_ready')
+
+      await sendMessage(
+        chatId,
+        TEXT.confirmSummary[locale](
+          session.selected_vehicle_model || 'Vehicle',
+          session.daily_rate ?? 0,
+          days,
+          totalAmount,
+          startDate,
+          selectedDate,
+        ),
+        [
+          [{ text: locale === 'ru' ? 'Подтвердить' : 'Confirm', callback_data: 'confirm_booking' }],
+          [{ text: locale === 'ru' ? 'Изменить даты' : 'Change dates', callback_data: 'change_booking' }],
+          [{ text: locale === 'ru' ? 'Другие автомобили' : 'View other vehicles', callback_data: 'view_other_vehicles' }],
+        ],
+      )
+      return
+    }
+
+    return
+  }
+
+  // Calendar: month navigation — edit the existing message in-place
+  if (data.startsWith('cal:nav:')) {
+    const parts = data.split(':') // ['cal', 'nav', 'start'|'end', 'YYYY-MM']
+    const mode = parts[2] as 'start' | 'end'
+    const [navYear, navMonth] = parts[3].split('-').map(Number)
+    const messageId = callback.message?.message_id
+
+    const session = await getSession(chatId)
+    const locale = t(session.locale)
+
+    await answerCallbackQuery(callback.id)
+
+    const keyboard = buildCalendarKeyboard(
+      navYear,
+      navMonth - 1,
+      session.blocked_ranges ?? [],
+      mode,
+      locale,
+      mode === 'end' ? session.requested_start_date : null,
+    )
+
+    const text = mode === 'start'
+      ? TEXT.calendarStart[locale](session.selected_vehicle_model ?? '')
+      : TEXT.calendarEnd[locale](session.requested_start_date ?? '')
+
+    if (messageId) {
+      await editMessage(chatId, messageId, text, keyboard)
+    } else {
+      await sendMessage(chatId, text, keyboard)
+    }
+    return
+  }
+
   const session = await getSession(chatId)
   const locale = t(session.locale)
 
@@ -824,7 +806,7 @@ async function handleCallback(callback: CallbackQuery) {
 
   if (data === 'change_booking') {
     await logInboundText(chatId, 'Make changes', 'button')
-    await saveSession(chatId, {
+    const next = await saveSession(chatId, {
       step: 'awaiting_start_date',
       requested_start_date: null,
       requested_days: null,
@@ -832,7 +814,9 @@ async function handleCallback(callback: CallbackQuery) {
       total_amount: null,
     })
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Изменить' : 'Make changes')
-    await sendMessage(chatId, TEXT.restartDate[locale])
+    const now = new Date()
+    const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), next.blocked_ranges ?? [], 'start', locale)
+    await sendMessage(chatId, TEXT.calendarStart[locale](next.selected_vehicle_model ?? ''), keyboard)
     return
   }
 
@@ -896,71 +880,19 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
+  // Date steps: user typed instead of tapping the calendar — re-show it
   if (session.step === 'awaiting_start_date') {
-    const startDate = parseDate(text)
-    if (!startDate) {
-      await sendMessage(chatId, TEXT.badStartDate[locale])
-      return
-    }
-
-    const blockedRanges = session.blocked_ranges ?? []
-    const startBlocked = blockedRanges.some((range) => startDate >= range.startDate && startDate <= range.endDate)
-    if (startBlocked) {
-      await sendMessage(chatId, TEXT.bookedRangeConflict[locale](session.selected_vehicle_model || 'This vehicle', formatBlockedRanges(blockedRanges)))
-      return
-    }
-
-    session = await saveSession(chatId, {
-      step: 'awaiting_days',
-      requested_start_date: startDate,
-      telegram_name: formatTelegramName(message.from),
-      telegram_username: message.from?.username ?? null,
-    })
-    await persistBooking(session, 'draft')
-    await sendMessage(chatId, TEXT.askDays[locale](session.selected_vehicle_model || 'Vehicle', startDate))
+    const now = new Date()
+    const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), session.blocked_ranges ?? [], 'start', locale)
+    await sendMessage(chatId, TEXT.calendarStart[locale](session.selected_vehicle_model ?? ''), keyboard)
     return
   }
 
-  if (session.step === 'awaiting_days') {
-    const days = parseRentalDays(text)
-    if (!days) {
-      await sendMessage(chatId, TEXT.badDays[locale])
-      return
-    }
-
-    const totalAmount = (session.daily_rate ?? 0) * days
-    const endDate = addDays(session.requested_start_date!, days)
-    const blockedRanges = session.blocked_ranges ?? []
-    const overlapsBlockedRange = blockedRanges.some((range) => datesOverlap(session.requested_start_date!, endDate, range.startDate, range.endDate))
-
-    if (overlapsBlockedRange) {
-      await saveSession(chatId, {
-        step: 'awaiting_start_date',
-        requested_days: null,
-        requested_end_date: null,
-        total_amount: null,
-      })
-      await sendMessage(chatId, TEXT.bookedRangeConflict[locale](session.selected_vehicle_model || 'This vehicle', formatBlockedRanges(blockedRanges)))
-      return
-    }
-
-    session = await saveSession(chatId, {
-      step: 'awaiting_confirmation',
-      requested_days: days,
-      requested_end_date: endDate,
-      total_amount: totalAmount,
-    })
-    await persistBooking(session, 'quote_ready')
-
-    await sendMessage(
-      chatId,
-      TEXT.confirmSummary[locale](session.selected_vehicle_model || 'Vehicle', session.daily_rate ?? 0, days, totalAmount, session.requested_start_date || '', endDate),
-      [
-        [{ text: locale === 'ru' ? 'Подтвердить' : 'Confirm', callback_data: 'confirm_booking' }],
-        [{ text: locale === 'ru' ? 'Изменить' : 'Make changes', callback_data: 'change_booking' }],
-        [{ text: locale === 'ru' ? 'Другие автомобили' : 'View other vehicles', callback_data: 'view_other_vehicles' }],
-      ],
-    )
+  if (session.step === 'awaiting_end_date') {
+    const startDate = session.requested_start_date!
+    const [yr, mo] = startDate.split('-').map(Number)
+    const keyboard = buildCalendarKeyboard(yr, mo - 1, session.blocked_ranges ?? [], 'end', locale, startDate)
+    await sendMessage(chatId, TEXT.calendarEnd[locale](startDate), keyboard)
     return
   }
 
