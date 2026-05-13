@@ -15,9 +15,10 @@ export async function POST(request: NextRequest) {
   try {
     const update = await request.json()
     await processTelegramUpdate(update)
-    return NextResponse.json({ ok: true })
   } catch (error) {
+    // Log but always return 200 — Telegram retries on any non-200 response,
+    // which creates a retry storm and prevents the bot from processing new updates.
     console.error('telegram webhook error', error)
-    return NextResponse.json({ ok: false }, { status: 500 })
   }
+  return NextResponse.json({ ok: true })
 }
