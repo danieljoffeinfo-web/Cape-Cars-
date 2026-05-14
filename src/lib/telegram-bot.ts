@@ -304,11 +304,16 @@ async function telegramApi(method: string, payload: Record<string, unknown>) {
 
 async function sendMessage(chatId: string, text: string, buttons?: TelegramInlineButton[][]) {
   const session = await getSession(chatId)
-  await telegramApi('sendMessage', {
-    chat_id: chatId,
-    text,
-    reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
-  })
+  try {
+    await telegramApi('sendMessage', {
+      chat_id: chatId,
+      text,
+      reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+    })
+  } catch (error) {
+    console.error('sendMessage failed', { chatId, error })
+    return
+  }
   await logTelegramConversation({
     chatId,
     customerId: session.customer_id ?? null,
@@ -320,12 +325,16 @@ async function sendMessage(chatId: string, text: string, buttons?: TelegramInlin
 }
 
 async function editMessage(chatId: string, messageId: number, text: string, buttons?: TelegramInlineButton[][]) {
-  await telegramApi('editMessageText', {
-    chat_id: chatId,
-    message_id: messageId,
-    text,
-    reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
-  })
+  try {
+    await telegramApi('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+    })
+  } catch (error) {
+    console.error('editMessage failed', { chatId, messageId, error })
+  }
 }
 
 async function sendPhoto(chatId: string, photo: string, caption: string, buttons?: TelegramInlineButton[][]) {
@@ -563,12 +572,22 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory, lo
 
   for (const vehicle of vehicles) {
     if (!vehicle.imageUrl) continue
-    await sendPhoto(
-      chatId,
-      vehicle.imageUrl,
-      formatVehicleCaption(vehicle, locale),
-      [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
-    )
+    try {
+      await sendPhoto(
+        chatId,
+        vehicle.imageUrl,
+        formatVehicleCaption(vehicle, locale),
+        [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
+      )
+    } catch (error) {
+      console.error('sendPhoto failed for vehicle', vehicle.id, error)
+      // Fall back to a text message so the customer can still book
+      await sendMessage(
+        chatId,
+        formatVehicleCaption(vehicle, locale),
+        [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
+      )
+    }
   }
 }
 
