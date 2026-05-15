@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, TELEGRAM_CATALOG_IMAGE_BY_MODEL, type VehicleCategory } from '@/lib/telegram-catalog'
+import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, getTelegramVehicleDisplay, type VehicleCategory } from '@/lib/telegram-catalog'
 import { buildTelegramProxyUrl, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
 import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
 
@@ -31,6 +31,7 @@ export type BotSession = {
   selected_category?: VehicleCategory | null
   selected_vehicle_id?: string | null
   selected_vehicle_model?: string | null
+  selected_vehicle_display_model?: string | null
   daily_rate?: number | null
   requested_start_date?: string | null
   requested_days?: number | null
@@ -67,6 +68,7 @@ type TelegramInlineButton = { text: string; callback_data: string }
 type VehicleChoice = {
   id: string
   model: string
+  bookingModel: string
   category: VehicleCategory
   rate: number
   status: string
@@ -199,6 +201,7 @@ function defaultSession(chatId: string): BotSession {
     selected_category: null,
     selected_vehicle_id: null,
     selected_vehicle_model: null,
+    selected_vehicle_display_model: null,
     daily_rate: null,
     requested_start_date: null,
     requested_days: null,
@@ -386,13 +389,15 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
       const vehicles = await getVehiclesForCustomerCategory(categoryHint)
       const matched = vehicles.find((vehicle) => vehicle.id === vehicleId)
       if (matched) {
+        const display = getTelegramVehicleDisplay(matched.model)
         return {
           id: matched.id,
-          model: matched.model,
+          model: display.model,
+          bookingModel: matched.model,
           category: matched.cat as VehicleCategory,
           rate: matched.rate,
           status: matched.status,
-          imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[matched.model] || matched.image_url || '',
+          imageUrl: display.imageUrl || matched.image_url || '',
           source: 'db',
           blockedRanges: matched.blockedRanges,
           isBlocked: matched.isBlocked,
@@ -402,13 +407,15 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
 
     const vehicle = await getVehicleById(vehicleId)
     if (!vehicle) return null
+    const display = getTelegramVehicleDisplay(vehicle.model)
     return {
       id: vehicle.id,
-      model: vehicle.model,
+      model: display.model,
+      bookingModel: vehicle.model,
       category: vehicle.cat as VehicleCategory,
       rate: vehicle.rate,
       status: vehicle.status,
-      imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[vehicle.model] || vehicle.image_url || '',
+      imageUrl: display.imageUrl || vehicle.image_url || '',
       source: 'db',
       blockedRanges: [],
       isBlocked: vehicle.status === 'Booked',
@@ -420,6 +427,7 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
   return {
     id: vehicle.id,
     model: vehicle.model,
+    bookingModel: vehicle.model,
     category: vehicle.category,
     rate: vehicle.rate,
     status: vehicle.status,
@@ -531,22 +539,27 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory, lo
   const liveVehicles = await getVehiclesForCustomerCategory(category)
   const vehicles: VehicleChoice[] = (liveVehicles && liveVehicles.length > 0)
     ? liveVehicles
-      .filter((vehicle) => vehicle.image_url || TELEGRAM_CATALOG_IMAGE_BY_MODEL[vehicle.model])
-      .map((vehicle) => ({
-        id: vehicle.id,
-        model: vehicle.model,
-        category: vehicle.cat as VehicleCategory,
-        rate: vehicle.rate,
-        status: vehicle.status,
-        imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[vehicle.model] || vehicle.image_url || '',
-        source: 'db' as const,
-        blockedRanges: vehicle.blockedRanges,
-        isBlocked: vehicle.isBlocked,
-      }))
+      .map((vehicle) => {
+        const display = getTelegramVehicleDisplay(vehicle.model)
+        return {
+          id: vehicle.id,
+          model: display.model,
+          bookingModel: vehicle.model,
+          category: vehicle.cat as VehicleCategory,
+          rate: vehicle.rate,
+          status: vehicle.status,
+          imageUrl: display.imageUrl || vehicle.image_url || '',
+          source: 'db' as const,
+          blockedRanges: vehicle.blockedRanges,
+          isBlocked: vehicle.isBlocked,
+        }
+      })
+      .filter((vehicle) => Boolean(vehicle.imageUrl))
     : vehiclesForCategory(category)
       .map((vehicle) => ({
         id: vehicle.id,
         model: vehicle.model,
+        bookingModel: vehicle.model,
         category: vehicle.category,
         rate: vehicle.rate,
         status: vehicle.status,
@@ -615,6 +628,7 @@ async function handleCategorySelect(callback: CallbackQuery, category: VehicleCa
     selected_category: category,
     selected_vehicle_id: null,
     selected_vehicle_model: null,
+    selected_vehicle_display_model: null,
     daily_rate: CATEGORY_PRICING[category],
     requested_start_date: null,
     requested_days: null,
@@ -652,7 +666,8 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
     telegram_username: callback.from?.username ?? null,
     selected_category: vehicle.category,
     selected_vehicle_id: vehicle.id,
-    selected_vehicle_model: vehicle.model,
+    selected_vehicle_model: vehicle.bookingModel,
+    selected_vehicle_display_model: vehicle.model,
     daily_rate: vehicle.rate,
     requested_start_date: null,
     requested_days: null,
@@ -750,7 +765,7 @@ async function handleCallback(callback: CallbackQuery) {
       await sendMessage(
         chatId,
         TEXT.confirmSummary[locale](
-          session.selected_vehicle_model || 'Vehicle',
+          session.selected_vehicle_display_model || session.selected_vehicle_model || 'Vehicle',
           session.daily_rate ?? 0,
           days,
           totalAmount,
@@ -790,7 +805,7 @@ async function handleCallback(callback: CallbackQuery) {
     )
 
     const text = mode === 'start'
-      ? TEXT.calendarStart[locale](session.selected_vehicle_model ?? '')
+      ? TEXT.calendarStart[locale](session.selected_vehicle_display_model ?? session.selected_vehicle_model ?? '')
       : TEXT.calendarEnd[locale](session.requested_start_date ?? '')
 
     if (messageId) {
@@ -825,7 +840,7 @@ async function handleCallback(callback: CallbackQuery) {
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Изменить' : 'Make changes')
     const now = new Date()
     const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), next.blocked_ranges ?? [], 'start', locale)
-    await sendMessage(chatId, TEXT.calendarStart[locale](next.selected_vehicle_model ?? ''), keyboard)
+    await sendMessage(chatId, TEXT.calendarStart[locale](next.selected_vehicle_display_model ?? next.selected_vehicle_model ?? ''), keyboard)
     return
   }
 
@@ -840,6 +855,7 @@ async function handleCallback(callback: CallbackQuery) {
       total_amount: null,
       selected_vehicle_id: null,
       selected_vehicle_model: null,
+      selected_vehicle_display_model: null,
       selected_category: null,
       daily_rate: null,
       customer_full_name: null,
@@ -892,7 +908,7 @@ async function handleMessage(message: TelegramMessage) {
   if (session.step === 'awaiting_start_date') {
     const now = new Date()
     const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), session.blocked_ranges ?? [], 'start', locale)
-    await sendMessage(chatId, TEXT.calendarStart[locale](session.selected_vehicle_model ?? ''), keyboard)
+    await sendMessage(chatId, TEXT.calendarStart[locale](session.selected_vehicle_display_model ?? session.selected_vehicle_model ?? ''), keyboard)
     return
   }
 
