@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { getInternalTelegramVehicleModel } from '@/lib/telegram-catalog'
+import { getInternalTelegramVehicleModel, getTelegramVehicleDisplay } from '@/lib/telegram-catalog'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -621,14 +621,15 @@ export async function getVehiclesForCustomerCategory(category: string) {
     for (const booking of ((bookings ?? []) as any[])) {
       if (!booking.vehicle_name || !booking.start_date || !booking.end_date) continue
       if (!bookingHoldIsActive(booking)) continue
-      const existing = blockedByModel.get(booking.vehicle_name) ?? []
+      const normalizedModel = getTelegramVehicleDisplay(booking.vehicle_name).model
+      const existing = blockedByModel.get(normalizedModel) ?? []
       existing.push({
         startDate: normalizeDate(booking.start_date)!,
         endDate: normalizeDate(booking.end_date)!,
         source: 'telegram',
         status: booking.status,
       })
-      blockedByModel.set(booking.vehicle_name, existing)
+      blockedByModel.set(normalizedModel, existing)
     }
 
     for (const rental of ((rentals ?? []) as any[])) {
