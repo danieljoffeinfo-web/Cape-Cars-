@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, type VehicleCategory } from '@/lib/telegram-catalog'
+import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, TELEGRAM_CATALOG_IMAGE_BY_MODEL, type VehicleCategory } from '@/lib/telegram-catalog'
 import { buildTelegramProxyUrl, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
 import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
 
@@ -392,7 +392,7 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
           category: matched.cat as VehicleCategory,
           rate: matched.rate,
           status: matched.status,
-          imageUrl: matched.image_url || '',
+          imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[matched.model] || matched.image_url || '',
           source: 'db',
           blockedRanges: matched.blockedRanges,
           isBlocked: matched.isBlocked,
@@ -408,7 +408,7 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
       category: vehicle.cat as VehicleCategory,
       rate: vehicle.rate,
       status: vehicle.status,
-      imageUrl: vehicle.image_url || '',
+      imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[vehicle.model] || vehicle.image_url || '',
       source: 'db',
       blockedRanges: [],
       isBlocked: vehicle.status === 'Booked',
@@ -531,14 +531,14 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory, lo
   const liveVehicles = await getVehiclesForCustomerCategory(category)
   const vehicles: VehicleChoice[] = (liveVehicles && liveVehicles.length > 0)
     ? liveVehicles
-      .filter((vehicle) => vehicle.image_url)
+      .filter((vehicle) => vehicle.image_url || TELEGRAM_CATALOG_IMAGE_BY_MODEL[vehicle.model])
       .map((vehicle) => ({
         id: vehicle.id,
         model: vehicle.model,
         category: vehicle.cat as VehicleCategory,
         rate: vehicle.rate,
         status: vehicle.status,
-        imageUrl: vehicle.image_url || '',
+        imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[vehicle.model] || vehicle.image_url || '',
         source: 'db' as const,
         blockedRanges: vehicle.blockedRanges,
         isBlocked: vehicle.isBlocked,

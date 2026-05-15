@@ -21,6 +21,24 @@ export const CATEGORY_PRICING: Record<VehicleCategory, number> = {
   'Large Vehicles': 4000,
 }
 
+const FALLBACK_PUBLIC_BASE_URL = 'https://car-demo-chom.vercel.app'
+const CLOUINARY_CLOUD = 'dmanxetyl'
+
+function publicBaseUrl() {
+  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL
+    || process.env.NEXT_PUBLIC_APP_URL
+    || process.env.VERCEL_PROJECT_PRODUCTION_URL
+    || process.env.VERCEL_URL
+
+  if (!fromEnv) return FALLBACK_PUBLIC_BASE_URL
+  return fromEnv.startsWith('http') ? fromEnv : `https://${fromEnv}`
+}
+
+function catalogImage(category: VehicleCategory, fileName: string) {
+  const sourceUrl = `${publicBaseUrl()}/telegram-cars/${encodeURIComponent(category)}/${encodeURIComponent(fileName)}`
+  return `https://res.cloudinary.com/${CLOUINARY_CLOUD}/image/fetch/f_auto,q_auto/${encodeURIComponent(sourceUrl)}`
+}
+
 export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
   {
     id: 'mini-countryman-s',
@@ -28,7 +46,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Mid Tier Vehicles',
     rate: 2000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589716/cape-cars/Mid%20Tier%20Vehicles/Mini%20Countryman%20S.jpg',
+    imageUrl: catalogImage('Mid Tier Vehicles', 'Image 13.jpg'),
   },
   {
     id: 'hyundai-accent-sedan',
@@ -36,7 +54,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Mid Tier Vehicles',
     rate: 2000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589720/cape-cars/Mid%20Tier%20Vehicles/Hyundai%20Accent%20Sedan.jpg',
+    imageUrl: catalogImage('Mid Tier Vehicles', 'Image 16.jpg'),
   },
   {
     id: 'hyundai-i20-hatchback',
@@ -44,7 +62,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Mid Tier Vehicles',
     rate: 2000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589723/cape-cars/Mid%20Tier%20Vehicles/Hyundai%20i20%20Hatchback.jpg',
+    imageUrl: catalogImage('Mid Tier Vehicles', 'Image 19.jpg'),
   },
   {
     id: 'porsche-718-cayman',
@@ -52,7 +70,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589726/cape-cars/Luxury%20Vehicles/Porsche%20718%20Cayman.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 1.jpg'),
   },
   {
     id: 'kia-picanto',
@@ -60,7 +78,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Mid Tier Vehicles',
     rate: 2000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589730/cape-cars/Mid%20Tier%20Vehicles/Kia%20Picanto.jpg',
+    imageUrl: catalogImage('Mid Tier Vehicles', 'Image 21.jpg'),
   },
   {
     id: 'audi-q5-sq5',
@@ -68,7 +86,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589734/cape-cars/Luxury%20Vehicles/Audi%20Q5%20SQ5.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 11.jpg'),
   },
   {
     id: 'mercedes-a-class-hatchback',
@@ -76,7 +94,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589737/cape-cars/Luxury%20Vehicles/Mercedes%20A-Class%20Hatchback.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 12.jpg'),
   },
   {
     id: 'mercedes-g-class-g63',
@@ -84,7 +102,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589740/cape-cars/Luxury%20Vehicles/Mercedes%20G-Class%20G63.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 14.jpg'),
   },
   {
     id: 'bmw-4-series-gran-coupe',
@@ -92,7 +110,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589743/cape-cars/Luxury%20Vehicles/BMW%204%20Series%20Gran%20Coupe.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 15.jpg'),
   },
   {
     id: 'audi-q3-rs-q3-sportback',
@@ -100,7 +118,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589746/cape-cars/Luxury%20Vehicles/Audi%20Q3%20RS%20Q3%20Sportback.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 17.jpg'),
   },
   {
     id: 'mercedes-gle-coupe',
@@ -108,7 +126,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589749/cape-cars/Luxury%20Vehicles/Mercedes%20GLE%20Coupe.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 18.jpg'),
   },
   {
     id: 'jeep-wrangler-rubicon',
@@ -116,7 +134,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Large Vehicles',
     rate: 4000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589752/cape-cars/Large%20Vehicles/Jeep%20Wrangler%20Rubicon.jpg',
+    imageUrl: catalogImage('Large Vehicles', 'Image 13.jpg'),
   },
   {
     id: 'audi-a5-cabriolet',
@@ -124,7 +142,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589755/cape-cars/Luxury%20Vehicles/Audi%20A5%20Cabriolet.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 2.jpg'),
   },
   {
     id: 'volkswagen-tiguan-allspace',
@@ -132,7 +150,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Mid Tier Vehicles',
     rate: 2000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589758/cape-cars/Mid%20Tier%20Vehicles/Volkswagen%20Tiguan%20Allspace.jpg',
+    imageUrl: catalogImage('Mid Tier Vehicles', 'Image 22.jpg'),
   },
   {
     id: 'bmw-x5',
@@ -140,7 +158,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589761/cape-cars/Luxury%20Vehicles/BMW%20X5.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 23.jpg'),
   },
   {
     id: 'jaguar-f-type-coupe',
@@ -148,7 +166,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589764/cape-cars/Luxury%20Vehicles/Jaguar%20F-Type%20Coupe.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 3.jpg'),
   },
   {
     id: 'bmw-x5-m',
@@ -156,7 +174,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589767/cape-cars/Luxury%20Vehicles/BMW%20X5%20M.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 4.jpg'),
   },
   {
     id: 'hyundai-staria',
@@ -164,7 +182,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Large Vehicles',
     rate: 4000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589770/cape-cars/Large%20Vehicles/Hyundai%20Staria.jpg',
+    imageUrl: catalogImage('Large Vehicles', 'Image 25.jpg'),
   },
   {
     id: 'range-rover-sport',
@@ -172,7 +190,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589773/cape-cars/Luxury%20Vehicles/Range%20Rover%20Sport.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 5.jpg'),
   },
   {
     id: 'mercedes-c-class-sedan',
@@ -180,7 +198,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Luxury Vehicles',
     rate: 7000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589776/cape-cars/Luxury%20Vehicles/Mercedes%20C-Class%20Sedan.jpg',
+    imageUrl: catalogImage('Luxury Vehicles', 'Image 6.jpg'),
   },
   {
     id: 'hyundai-staria-2',
@@ -188,7 +206,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Large Vehicles',
     rate: 4000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589779/cape-cars/Large%20Vehicles/Hyundai%20Staria%202.jpg',
+    imageUrl: catalogImage('Large Vehicles', 'Image 25 2.jpg'),
   },
   {
     id: 'hyundai-h1-grand-starex',
@@ -196,7 +214,7 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Large Vehicles',
     rate: 4000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589780/cape-cars/Large%20Vehicles/Hyundai%20H1%20Grand%20Starex.jpg',
+    imageUrl: catalogImage('Large Vehicles', 'Image 6.jpg'),
   },
   {
     id: 'mercedes-sprinter-van',
@@ -204,6 +222,10 @@ export const TELEGRAM_CATALOG: TelegramCatalogVehicle[] = [
     category: 'Large Vehicles',
     rate: 4000,
     status: 'Available',
-    imageUrl: 'https://res.cloudinary.com/dmanxetyl/image/upload/v1778589783/cape-cars/Large%20Vehicles/Mercedes%20Sprinter%20Van.jpg',
+    imageUrl: catalogImage('Large Vehicles', 'Image 7.jpg'),
   },
 ]
+
+export const TELEGRAM_CATALOG_IMAGE_BY_MODEL = Object.fromEntries(
+  TELEGRAM_CATALOG.map((vehicle) => [vehicle.model, vehicle.imageUrl]),
+) as Record<string, string>
