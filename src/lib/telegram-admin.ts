@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { getInternalTelegramVehicleModel } from '@/lib/telegram-catalog'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -365,9 +366,10 @@ export async function syncTelegramBookingToRental(bookingId: string) {
     }
 
     const email = crmEmail(booking.chat_id)
+    const internalVehicleModel = getInternalTelegramVehicleModel(booking.vehicle_name, booking.vehicle_category)
     const [{ data: customer, error: customerError }, { data: vehicle, error: vehicleError }] = await Promise.all([
       supabase.from('customers').select('id').eq('email', email).maybeSingle(),
-      supabase.from('vehicles').select('id, model').eq('model', booking.vehicle_name).maybeSingle(),
+      supabase.from('vehicles').select('id, model').eq('model', internalVehicleModel).maybeSingle(),
     ])
 
     if (customerError) return { ok: false as const, error: customerError.message }

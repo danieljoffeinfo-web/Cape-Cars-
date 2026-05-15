@@ -276,30 +276,30 @@ export const TELEGRAM_CATALOG_IMAGE_BY_MODEL = Object.fromEntries(
   TELEGRAM_CATALOG.map((vehicle) => [vehicle.model, vehicle.imageUrl]),
 ) as Record<string, string>
 
-export const LEGACY_TELEGRAM_MODEL_DISPLAY: Record<string, { model: string, imageUrl: string }> = {
-  'Mini Countryman S': { model: 'Hyundai H1 Grand Starex', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai H1 Grand Starex'] },
-  'Hyundai Accent Sedan': { model: 'Toyota RAV4', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Toyota RAV4'] },
-  'Hyundai i20 Hatchback': { model: 'Hyundai i20', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai i20'] },
-  'Porsche 718 Cayman': { model: 'Jeep Wrangler Unlimited Rubicon', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Jeep Wrangler Unlimited Rubicon'] },
-  'Kia Picanto': { model: 'Honda Jazz', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Honda Jazz'] },
-  'Audi Q5 SQ5': { model: 'Mercedes-Benz S-Class', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz S-Class'] },
-  'Mercedes A-Class Hatchback': { model: 'Range Rover Sport', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Range Rover Sport'] },
-  'Mercedes G-Class G63': { model: 'BMW M2 Competition', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW M2 Competition'] },
-  'BMW 4 Series Gran Coupe': { model: 'Jaguar F-Type Convertible', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Jaguar F-Type Convertible'] },
-  'Audi Q3 RS Q3 Sportback': { model: 'Porsche 718 Boxster', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Porsche 718 Boxster'] },
-  'Mercedes GLE Coupe': { model: 'BMW X3 M Sport', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW X3 M Sport'] },
-  'Jeep Wrangler Rubicon': { model: 'Hyundai H1 Grand Starex', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai H1 Grand Starex'] },
-  'Audi A5 Cabriolet': { model: 'Porsche Cayman', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Porsche Cayman'] },
-  'Volkswagen Tiguan Allspace': { model: 'MINI Countryman', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['MINI Countryman'] },
-  'BMW X5': { model: 'BMW X5', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW X5'] },
-  'Jaguar F-Type Coupe': { model: 'BMW 4 Series Convertible', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW 4 Series Convertible'] },
-  'BMW X5 M': { model: 'BMW 3 Series Sedan', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW 3 Series Sedan'] },
-  'Hyundai Staria': { model: 'Hyundai Staria 2', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai Staria 2'] },
-  'Range Rover Sport': { model: 'Range Rover Sport 2', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Range Rover Sport 2'] },
-  'Mercedes C-Class Sedan': { model: 'Mercedes-Benz V-Class', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz V-Class'] },
-  'Hyundai Staria 2': { model: 'Hyundai Staria', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai Staria'] },
-  'Hyundai H1 Grand Starex': { model: 'Mercedes-Benz V-Class', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz V-Class'] },
-  'Mercedes Sprinter Van': { model: 'Mercedes-Benz Sprinter Minibus', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz Sprinter Minibus'] },
+export const LEGACY_TELEGRAM_MODEL_DISPLAY: Record<string, { model: string, category: VehicleCategory, imageUrl: string }> = {
+  'Mini Countryman S': { model: 'Hyundai H1 Grand Starex', category: 'Mid Tier Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai H1 Grand Starex'] },
+  'Hyundai Accent Sedan': { model: 'Toyota RAV4', category: 'Mid Tier Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Toyota RAV4'] },
+  'Hyundai i20 Hatchback': { model: 'Hyundai i20', category: 'Mid Tier Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai i20'] },
+  'Porsche 718 Cayman': { model: 'Jeep Wrangler Unlimited Rubicon', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Jeep Wrangler Unlimited Rubicon'] },
+  'Kia Picanto': { model: 'Honda Jazz', category: 'Mid Tier Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Honda Jazz'] },
+  'Audi Q5 SQ5': { model: 'Mercedes-Benz S-Class', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz S-Class'] },
+  'Mercedes A-Class Hatchback': { model: 'Range Rover Sport', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Range Rover Sport'] },
+  'Mercedes G-Class G63': { model: 'BMW M2 Competition', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW M2 Competition'] },
+  'BMW 4 Series Gran Coupe': { model: 'Jaguar F-Type Convertible', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Jaguar F-Type Convertible'] },
+  'Audi Q3 RS Q3 Sportback': { model: 'Porsche 718 Boxster', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Porsche 718 Boxster'] },
+  'Mercedes GLE Coupe': { model: 'BMW X3 M Sport', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW X3 M Sport'] },
+  'Jeep Wrangler Rubicon': { model: 'Hyundai H1 Grand Starex', category: 'Large Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai H1 Grand Starex'] },
+  'Audi A5 Cabriolet': { model: 'Porsche Cayman', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Porsche Cayman'] },
+  'Volkswagen Tiguan Allspace': { model: 'MINI Countryman', category: 'Mid Tier Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['MINI Countryman'] },
+  'BMW X5': { model: 'BMW X5', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW X5'] },
+  'Jaguar F-Type Coupe': { model: 'BMW 4 Series Convertible', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW 4 Series Convertible'] },
+  'BMW X5 M': { model: 'BMW 3 Series Sedan', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['BMW 3 Series Sedan'] },
+  'Hyundai Staria': { model: 'Hyundai Staria 2', category: 'Large Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai Staria 2'] },
+  'Range Rover Sport': { model: 'Range Rover Sport 2', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Range Rover Sport 2'] },
+  'Mercedes C-Class Sedan': { model: 'Mercedes-Benz V-Class', category: 'Luxury Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz V-Class'] },
+  'Hyundai Staria 2': { model: 'Hyundai Staria', category: 'Large Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Hyundai Staria'] },
+  'Hyundai H1 Grand Starex': { model: 'Mercedes-Benz V-Class', category: 'Large Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz V-Class'] },
+  'Mercedes Sprinter Van': { model: 'Mercedes-Benz Sprinter Minibus', category: 'Large Vehicles', imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL['Mercedes-Benz Sprinter Minibus'] },
 }
 
 export function getTelegramVehicleDisplay(model: string) {
@@ -307,4 +307,14 @@ export function getTelegramVehicleDisplay(model: string) {
     model,
     imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[model] ?? '',
   }
+}
+
+export function getInternalTelegramVehicleModel(displayModel: string, category?: string | null) {
+  const direct = LEGACY_TELEGRAM_MODEL_DISPLAY[displayModel]
+  if (direct) return displayModel
+
+  const matches = Object.entries(LEGACY_TELEGRAM_MODEL_DISPLAY).filter(([, value]) => value.model === displayModel)
+  if (matches.length === 0) return displayModel
+  const categoryMatch = category ? matches.find(([, value]) => value.category === category) : null
+  return (categoryMatch ?? matches[0])?.[0] ?? displayModel
 }
