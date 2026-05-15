@@ -39,6 +39,8 @@ export default function CRMPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -103,6 +105,22 @@ export default function CRMPage() {
     setShowModal(false); load()
   }
 
+  const deleteAllCustomers = async () => {
+    setDeletingAll(true)
+    setError(null)
+    const { error: e } = await supabase.from('customers').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    if (e) {
+      setError(e.message)
+      setDeletingAll(false)
+      return
+    }
+    setConfirmDeleteAll(false)
+    setSelected(null)
+    setShowModal(false)
+    await load()
+    setDeletingAll(false)
+  }
+
   const filtered = customers.filter(c =>
     !search ||
     c.full_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -112,14 +130,19 @@ export default function CRMPage() {
 
   return (
     <div className="space-y-6 max-w-7xl">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-light text-neutral-900">Customer CRM</h1>
           <p className="mt-1 text-sm text-neutral-500">Profiles, license details & rental history</p>
         </div>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors">
-          + Add customer
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setConfirmDeleteAll(true)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-red-200 text-red-600 text-sm hover:bg-red-50 transition-colors">
+            Delete all customers
+          </button>
+          <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors">
+            + Add customer
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -212,6 +235,22 @@ export default function CRMPage() {
           </div>
         )}
       </div>
+
+      {confirmDeleteAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deletingAll && setConfirmDeleteAll(false)} />
+          <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-lg font-medium text-neutral-900">Delete all customers?</h2>
+            <p className="mt-2 text-sm text-neutral-500">This removes every customer in the CRM. Rentals or invoices linked by foreign keys may block the delete.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setConfirmDeleteAll(false)} disabled={deletingAll} className="px-4 py-2 rounded-full bg-neutral-100 text-sm text-neutral-700 hover:bg-neutral-200 transition-colors disabled:opacity-50">Cancel</button>
+              <button onClick={deleteAllCustomers} disabled={deletingAll} className="px-4 py-2 rounded-full bg-red-600 text-sm text-white hover:bg-red-700 transition-colors disabled:opacity-50">
+                {deletingAll ? 'Deleting…' : 'Delete all'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Customer detail modal */}
       {selected && !showModal && (

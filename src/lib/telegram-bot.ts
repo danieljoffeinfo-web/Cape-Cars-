@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, getTelegramVehicleDisplay, type VehicleCategory } from '@/lib/telegram-catalog'
-import { buildTelegramProxyUrl, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
+import { buildTelegramProxyUrl, getLatestTelegramBookingForChat, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
 import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
 
 type Locale = 'en' | 'ru'
@@ -126,12 +126,12 @@ const TEXT = {
     ru: (model: string) => `Забронировать ${model}`,
   },
   calendarStart: {
-    en: (model: string) => `📅 ${model}\n\nSelect your start date.\n✖ = already booked`,
-    ru: (model: string) => `📅 ${model}\n\nВыберите дату начала аренды.\n✖ = уже забронировано`,
+    en: (model: string) => `📅 ${model}\n\nSelect your start date.\n• = already booked`,
+    ru: (model: string) => `📅 ${model}\n\nВыберите дату начала аренды.\n• = уже забронировано`,
   },
   calendarEnd: {
-    en: (startDate: string) => `📅 Start date: ${startDate}\n\nNow select your return date.\n✖ = already booked`,
-    ru: (startDate: string) => `📅 Дата начала: ${startDate}\n\nВыберите дату возврата.\n✖ = уже забронировано`,
+    en: (startDate: string) => `📅 Start date: ${startDate}\n\nNow select your return date.\n• = already booked`,
+    ru: (startDate: string) => `📅 Дата начала: ${startDate}\n\nВыберите дату возврата.\n• = уже забронировано`,
   },
   confirmSummary: {
     en: (model: string, dailyRate: number, days: number, totalAmount: number, startDate: string, endDate: string) => [
@@ -185,6 +185,72 @@ const TEXT = {
     en: 'There are no vehicles in this category right now.',
     ru: 'Сейчас в этой категории нет автомобилей.',
   },
+  bookingConfirmed: {
+    en: '✅ Booking confirmed. Choose your language below to review the short rental terms.',
+    ru: '✅ Бронирование подтверждено. Выберите язык ниже, чтобы посмотреть краткие условия аренды.',
+  },
+  termsShort: {
+    en: [
+      'SHORT RENTAL TERMS',
+      '',
+      '• Driver must be 23+ with 2+ years driving experience',
+      '• Required: passport, driver license, WhatsApp number, payment proof',
+      '• Booking deposit: 5000 RUB',
+      '• Office handover: 21 Montague Drive, Montague Gardens, Cape Town, 7441',
+      '• Airport delivery: $100 each way',
+      '• After-hours delivery/return: double rate',
+      '• Return the car clean and with the same fuel level',
+      '• Late return: 1000 ZAR, over 3 hours = extra rental day',
+      '• No smoking, no third-party drivers, no taxi/delivery use, no drunk driving',
+      '• In an accident, contact the manager immediately and get a police case number',
+      '• Cancellation less than 5 days before start: prepayment is non-refundable',
+      '',
+      'Tap Accept to continue to payment details.',
+    ].join('\n'),
+    ru: [
+      'КРАТКИЕ УСЛОВИЯ АРЕНДЫ',
+      '',
+      '• Водитель: от 23 лет, стаж от 2 лет',
+      '• Нужно отправить: паспорт, водительское удостоверение, WhatsApp, подтверждение оплаты',
+      '• Предоплата за бронирование: 5000 ₽',
+      '• Выдача в офисе: 21 Montague Drive, Montague Gardens, Cape Town, 7441',
+      '• Доставка в аэропорт: 100$ в одну сторону',
+      '• Подача/возврат вне рабочего времени: двойной тариф',
+      '• Авто нужно вернуть чистым и с тем же уровнем топлива',
+      '• Опоздание с возвратом: 1000 ZAR, более 3 часов = дополнительный день аренды',
+      '• Запрещено: курение, передача третьим лицам, такси/доставка, вождение в нетрезвом виде',
+      '• При ДТП сразу свяжитесь с менеджером и получите номер дела в полиции',
+      '• При отмене менее чем за 5 дней предоплата не возвращается',
+      '',
+      'Нажмите «Принять», чтобы перейти к оплате.',
+    ].join('\n'),
+  },
+  paymentDetails: {
+    en: [
+      'PAYMENT DETAILS',
+      '',
+      '+7-999-217-03-12',
+      'Евгений Н.',
+      'Альфа-Банк / Сбербанк / Т-Банк',
+      'Amount: 5000 RUB',
+      '',
+      'Please send proof of payment after payment.',
+    ].join('\n'),
+    ru: [
+      'РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ',
+      '',
+      '+7-999-217-03-12',
+      'Евгений Н.',
+      'Альфа-Банк / Сбербанк / Т-Банк',
+      'Сумма: 5000 ₽',
+      '',
+      'Пожалуйста, отправьте подтверждение оплаты после перевода.',
+    ].join('\n'),
+  },
+  cashPayment: {
+    en: 'Cash payment selected. A manager will be in touch shortly.',
+    ru: 'Выбрана оплата наличными. Менеджер свяжется с вами в ближайшее время.',
+  },
 } as const
 
 function defaultSession(chatId: string): BotSession {
@@ -227,8 +293,73 @@ function bookingCode(bookingId?: string | null) {
   return bookingId ? `CC-${bookingId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'CC-PENDING'
 }
 
+async function restoreSession(chatId: string): Promise<BotSession | null> {
+  const booking = await getLatestTelegramBookingForChat(chatId)
+  if (!booking) return null
+
+  const customer = Array.isArray(booking.telegram_customers)
+    ? booking.telegram_customers[0] ?? null
+    : booking.telegram_customers ?? null
+
+  const selectedCategory = (booking.vehicle_category as VehicleCategory | null) ?? null
+  const display = booking.vehicle_name ? getTelegramVehicleDisplay(booking.vehicle_name) : null
+
+  let blockedRanges: VehicleBlockedRange[] = []
+  if (selectedCategory && booking.vehicle_name) {
+    const vehicles = await getVehiclesForCustomerCategory(selectedCategory)
+    const matched = vehicles.find((vehicle) => vehicle.model === booking.vehicle_name)
+    blockedRanges = matched?.blockedRanges ?? []
+  }
+
+  const inferredStep: SessionStep = (() => {
+    if (!booking.vehicle_category) return 'choosing_category'
+    if (!booking.vehicle_name) return 'choosing_vehicle'
+    if (!booking.start_date) return 'awaiting_start_date'
+    if (!booking.end_date || !booking.total_days) return 'awaiting_end_date'
+    if (booking.status === 'quote_ready') return 'awaiting_confirmation'
+    if (!(customer?.full_name ?? null)) return 'awaiting_full_name'
+    if (!(customer?.phone ?? null)) return 'awaiting_phone'
+    if (!booking.id_file_id) return 'awaiting_id_image'
+    if (!booking.license_file_id) return 'awaiting_license_image'
+    return 'completed'
+  })()
+
+  return {
+    ...defaultSession(chatId),
+    booking_id: booking.id,
+    customer_id: booking.customer_id,
+    step: inferredStep,
+    locale: 'en',
+    telegram_name: customer?.telegram_name ?? null,
+    telegram_username: customer?.telegram_username ?? null,
+    customer_full_name: customer?.full_name ?? null,
+    customer_phone: customer?.phone ?? null,
+    selected_category: selectedCategory,
+    selected_vehicle_model: booking.vehicle_name ?? null,
+    selected_vehicle_display_model: display?.model ?? booking.vehicle_name ?? null,
+    requested_start_date: booking.start_date ?? null,
+    requested_days: booking.total_days ?? null,
+    requested_end_date: booking.end_date ?? null,
+    daily_rate: booking.daily_rate ?? null,
+    total_amount: booking.total_amount ?? null,
+    id_file_id: booking.id_file_id ?? null,
+    license_file_id: booking.license_file_id ?? null,
+    blocked_ranges: blockedRanges,
+    updated_at: booking.updated_at,
+  }
+}
+
 async function getSession(chatId: string): Promise<BotSession> {
-  return memorySessions.get(chatId) ?? defaultSession(chatId)
+  const existing = memorySessions.get(chatId)
+  if (existing) return existing
+
+  const restored = await restoreSession(chatId)
+  if (restored) {
+    memorySessions.set(chatId, restored)
+    return restored
+  }
+
+  return defaultSession(chatId)
 }
 
 async function saveSession(chatId: string, patch: Partial<BotSession>): Promise<BotSession> {
@@ -375,6 +506,21 @@ function getLanguageButtons() {
   ]]
 }
 
+function getTermsLanguageButtons() {
+  return [[
+    { text: 'English', callback_data: 'terms:en' },
+    { text: 'Русский', callback_data: 'terms:ru' },
+  ]]
+}
+
+function getTermsAcceptButtons(locale: Locale) {
+  return [[{ text: locale === 'ru' ? 'Принять' : 'Accept', callback_data: `terms_accept:${locale}` }]]
+}
+
+function getPaymentButtons(locale: Locale) {
+  return [[{ text: locale === 'ru' ? 'Оплата наличными' : 'Cash payment', callback_data: `cash_payment:${locale}` }]]
+}
+
 function getCategoryButtons(locale: Locale) {
   return CATEGORY_ORDER.map((category) => [{ text: CATEGORY_LABELS[locale][category], callback_data: `category:${category}` }])
 }
@@ -512,7 +658,7 @@ function buildCalendarKeyboard(
       const disabled = isPast || isBlocked || isBeforeOrOnStart || wouldOverlap
 
       row.push({
-        text: isBlocked ? '✖' : disabled ? '·' : String(day),
+        text: isBlocked ? '•' : disabled ? '·' : String(day),
         callback_data: disabled ? 'cal:noop' : `cal:select:${dateStr}`,
       })
     }
@@ -701,6 +847,30 @@ async function handleCallback(callback: CallbackQuery) {
     session = (await ensureCustomer(session)) ?? session
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Русский' : 'English')
     await sendCategoryPrompt(chatId, locale)
+    return
+  }
+
+  if (data.startsWith('terms:')) {
+    const locale = data.replace('terms:', '') as Locale
+    await saveSession(chatId, { locale })
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Условия аренды' : 'Rental terms')
+    await sendMessage(chatId, TEXT.termsShort[locale], getTermsAcceptButtons(locale))
+    return
+  }
+
+  if (data.startsWith('terms_accept:')) {
+    const locale = data.replace('terms_accept:', '') as Locale
+    await saveSession(chatId, { locale })
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Принято' : 'Accepted')
+    await sendMessage(chatId, TEXT.paymentDetails[locale], getPaymentButtons(locale))
+    return
+  }
+
+  if (data.startsWith('cash_payment:')) {
+    const locale = data.replace('cash_payment:', '') as Locale
+    await saveSession(chatId, { locale })
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Оплата наличными' : 'Cash payment')
+    await sendMessage(chatId, TEXT.cashPayment[locale])
     return
   }
 

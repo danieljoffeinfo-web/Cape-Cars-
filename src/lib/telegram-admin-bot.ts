@@ -325,7 +325,15 @@ async function sendMainMenu(chatId: string, text = 'Cape Cars admin bot is ready
 async function sendCustomerBookingConfirmed(chatId: string) {
   await customerTelegramApi('sendMessage', {
     chat_id: chatId,
-    text: 'Your booking has been confirmed. We will confirm payment with you shortly.',
+    text: '✅ Booking confirmed. / ✅ Бронирование подтверждено.\n\nChoose your language / Выберите язык',
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: 'English', callback_data: 'terms:en' },
+          { text: 'Русский', callback_data: 'terms:ru' },
+        ],
+      ],
+    },
   })
 }
 

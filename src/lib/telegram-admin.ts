@@ -285,6 +285,32 @@ export async function getTelegramBookingById(bookingId: string) {
   }
 }
 
+export async function getLatestTelegramBookingForChat(chatId: string) {
+  const supabase = getAdminClient()
+  if (!supabase) return null
+
+  try {
+    const { data, error } = await supabase
+      .from('telegram_bookings')
+      .select('*, telegram_customers(full_name, phone, telegram_name, telegram_username)')
+      .eq('chat_id', chatId)
+      .in('status', ['draft', 'quote_ready', 'customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'confirmed', 'payment_collected'])
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) {
+      console.error('getLatestTelegramBookingForChat failed', error)
+      return null
+    }
+
+    return (data ?? null) as TelegramBookingWithCustomer | null
+  } catch (error) {
+    console.error('getLatestTelegramBookingForChat exception', error)
+    return null
+  }
+}
+
 export async function updateTelegramBookingStatus(bookingId: string, status: string) {
   const supabase = getAdminClient()
   if (!supabase) return null
