@@ -103,14 +103,7 @@ function publicBaseUrl() {
 
 function bookingHoldIsActive(booking: { status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }) {
   if (booking.released_at) return false
-  if (['confirmed_booking', 'confirmed', 'payment_collected'].includes(booking.status)) return true
-  if (['pending', 'pre_confirmation'].includes(booking.status)) {
-    const expiresAt = booking.hold_expires_at
-      ? new Date(booking.hold_expires_at).getTime()
-      : new Date(booking.created_at).getTime() + (HOLD_WINDOW_HOURS * 60 * 60 * 1000)
-    return expiresAt > Date.now()
-  }
-  return false
+  return ['confirmed_booking', 'confirmed', 'payment_collected'].includes(booking.status)
 }
 
 export function buildTelegramProxyUrl(fileId: string) {
@@ -130,9 +123,7 @@ function deriveBookingCode(bookingId: string) {
 }
 
 function deriveHoldExpiresAt(status?: string | null) {
-  return ['pending', 'pre_confirmation'].includes(status ?? '')
-    ? new Date(Date.now() + HOLD_WINDOW_HOURS * 60 * 60 * 1000).toISOString()
-    : null
+  return null
 }
 
 function isMissingColumnError(error: unknown) {
@@ -366,16 +357,33 @@ export async function syncTelegramBookingToRental(bookingId: string) {
     }
 
     const email = crmEmail(booking.chat_id)
-    const internalVehicleModel = getInternalTelegramVehicleModel(booking.vehicle_name, booking.vehicle_category)
-    const [{ data: customer, error: customerError }, { data: vehicle, error: vehicleError }] = await Promise.all([
+    const displayVehicleModel = getTelegramVehicleDisplay(booking.vehicle_name).model
+    const candidateModels = Array.from(new Set([
+      booking.vehicle_name,
+      displayVehicleModel,
+      getInternalTelegramVehicleModel(booking.vehicle_name, booking.vehicle_category),
+    ].filter(Boolean)))
+
+    const [customerResult, vehicleResult] = await Promise.all([
       supabase.from('customers').select('id').eq('email', email).maybeSingle(),
-      supabase.from('vehicles').select('id, model').eq('model', internalVehicleModel).maybeSingle(),
+      (booking.vehicle_category
+        ? supabase.from('vehicles').select('id, model, cat').in('model', candidateModels).eq('cat', booking.vehicle_category)
+        : supabase.from('vehicles').select('id, model, cat').in('model', candidateModels)
+      ),
     ])
+
+    const customer = customerResult.data
+    const customerError = customerResult.error
+    const vehicleError = vehicleResult.error
+    const vehicles = (vehicleResult.data ?? []) as Array<{ id: string, model: string, cat: string }>
+    const vehicle = vehicles.find((item) => item.model === booking.vehicle_name)
+      ?? vehicles.find((item) => item.model === displayVehicleModel)
+      ?? vehicles[0]
 
     if (customerError) return { ok: false as const, error: customerError.message }
     if (vehicleError) return { ok: false as const, error: vehicleError.message }
     if (!customer?.id) return { ok: false as const, error: 'Customer profile not found' }
-    if (!vehicle?.id) return { ok: false as const, error: 'Vehicle not found' }
+    if (!vehicle?.id) return { ok: false as const, error: `Vehicle not found (${candidateModels.join(' / ')})` }
 
     const notes = `Telegram booking ${booking.id}`
     const payload = {
@@ -485,7 +493,7 @@ export async function getAvailableVehiclesForCategory(category: string) {
         .from('telegram_bookings')
         .select('vehicle_name, status, created_at, hold_expires_at, released_at')
         .eq('vehicle_category', category)
-        .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected']),
+        .in('status', ['confirmed_booking', 'confirmed', 'payment_collected']),
     ])
 
     let safeBookings: any = bookings
@@ -494,7 +502,7 @@ export async function getAvailableVehiclesForCategory(category: string) {
         .from('telegram_bookings')
         .select('vehicle_name, status, created_at')
         .eq('vehicle_category', category)
-        .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected'])
+        .in('status', ['confirmed_booking', 'confirmed', 'payment_collected'])
 
       if (legacy.error) {
         console.error('getAvailableVehiclesForCategory bookings failed', legacy.error)
@@ -514,7 +522,7 @@ export async function getAvailableVehiclesForCategory(category: string) {
     const blockedModels = new Set(
       ((safeBookings ?? []) as { vehicle_name: string | null, status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }[])
         .filter((booking) => booking.vehicle_name && bookingHoldIsActive(booking))
-        .map((booking) => booking.vehicle_name as string),
+        .map((booking) => getTelegramVehicleDisplay(booking.vehicle_name as string).model),
     )
 
     return ((vehicles ?? []) as VehicleRow[]).filter((vehicle) => !blockedModels.has(vehicle.model))
@@ -603,7 +611,7 @@ export async function getVehiclesForCustomerCategory(category: string) {
         .from('telegram_bookings')
         .select('vehicle_name, start_date, end_date, status, created_at, hold_expires_at, released_at')
         .eq('vehicle_category', category)
-        .in('status', ['pending', 'pre_confirmation', 'confirmed_booking', 'confirmed', 'payment_collected']),
+        .in('status', ['confirmed_booking', 'confirmed', 'payment_collected']),
       supabase
         .from('rentals')
         .select('vehicle_id, start_date, end_date, status')

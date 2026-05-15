@@ -307,7 +307,8 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
   let blockedRanges: VehicleBlockedRange[] = []
   if (selectedCategory && booking.vehicle_name) {
     const vehicles = await getVehiclesForCustomerCategory(selectedCategory)
-    const matched = vehicles.find((vehicle) => vehicle.model === booking.vehicle_name)
+    const normalizedBookingModel = getTelegramVehicleDisplay(booking.vehicle_name).model
+    const matched = vehicles.find((vehicle) => vehicle.model === normalizedBookingModel || vehicle.model === booking.vehicle_name)
     blockedRanges = matched?.blockedRanges ?? []
   }
 
