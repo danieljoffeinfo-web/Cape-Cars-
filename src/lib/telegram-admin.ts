@@ -296,15 +296,15 @@ export async function getLatestTelegramBookingForChat(chatId: string) {
       .eq('chat_id', chatId)
       .in('status', ['draft', 'quote_ready', 'customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'confirmed', 'payment_collected'])
       .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+      .limit(10)
 
     if (error) {
       console.error('getLatestTelegramBookingForChat failed', error)
       return null
     }
 
-    return (data ?? null) as TelegramBookingWithCustomer | null
+    const bookings = (data ?? []) as TelegramBookingWithCustomer[]
+    return bookings[0] ?? null
   } catch (error) {
     console.error('getLatestTelegramBookingForChat exception', error)
     return null
