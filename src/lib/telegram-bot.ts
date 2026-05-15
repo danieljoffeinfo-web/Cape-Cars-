@@ -351,9 +351,20 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
 
 async function getSession(chatId: string): Promise<BotSession> {
   const existing = memorySessions.get(chatId)
-  if (existing) return existing
-
   const restored = await restoreSession(chatId)
+
+  if (restored) {
+    const existingIsBlank = !existing
+      || (!existing.booking_id && (existing.step === 'choosing_language' || !existing.locale))
+      || (existing.booking_id !== restored.booking_id && (existing.step === 'choosing_language' || !existing.locale))
+
+    if (existingIsBlank) {
+      memorySessions.set(chatId, restored)
+      return restored
+    }
+  }
+
+  if (existing) return existing
   if (restored) {
     memorySessions.set(chatId, restored)
     return restored
@@ -1058,11 +1069,18 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
-  const locale = t(session.locale)
+  let locale: Locale = t(session.locale)
 
   if (session.step === 'choosing_language' || !session.locale) {
-    await sendWelcome(chatId)
-    return
+    const restored = await restoreSession(chatId)
+    if (restored && restored.step !== 'choosing_language') {
+      memorySessions.set(chatId, restored)
+      session = restored
+      locale = t(session.locale)
+    } else {
+      await sendWelcome(chatId)
+      return
+    }
   }
 
   if (session.step === 'choosing_category') {
