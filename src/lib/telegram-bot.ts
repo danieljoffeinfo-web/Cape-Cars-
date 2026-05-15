@@ -316,11 +316,11 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
     if (!booking.vehicle_name) return 'choosing_vehicle'
     if (!booking.start_date) return 'awaiting_start_date'
     if (!booking.end_date || !booking.total_days) return 'awaiting_end_date'
-    if (booking.status === 'quote_ready') return 'awaiting_confirmation'
     if (!(customer?.full_name ?? null)) return 'awaiting_full_name'
     if (!(customer?.phone ?? null)) return 'awaiting_phone'
     if (!booking.id_file_id) return 'awaiting_id_image'
     if (!booking.license_file_id) return 'awaiting_license_image'
+    if (booking.status === 'quote_ready') return 'awaiting_confirmation'
     return 'completed'
   })()
 
@@ -1087,6 +1087,17 @@ async function handleMessage(message: TelegramMessage) {
     const [yr, mo] = startDate.split('-').map(Number)
     const keyboard = buildCalendarKeyboard(yr, mo - 1, session.blocked_ranges ?? [], 'end', locale, startDate)
     await sendMessage(chatId, TEXT.calendarEnd[locale](startDate), keyboard)
+    return
+  }
+
+  if (session.step === 'awaiting_confirmation' && text && text.length >= 3 && text.includes(' ')) {
+    session = await saveSession(chatId, {
+      step: 'awaiting_phone',
+      customer_full_name: text,
+    })
+    session = (await ensureCustomer(session)) ?? session
+    await persistBooking(session, 'customer_details_pending')
+    await sendMessage(chatId, TEXT.phone[locale])
     return
   }
 
