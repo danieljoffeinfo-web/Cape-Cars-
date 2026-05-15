@@ -97,7 +97,6 @@ const MONTH_NAMES: Record<Locale, string[]> = {
   ru: ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'],
 }
 
-// Week starts Monday
 const DAY_NAMES: Record<Locale, string[]> = {
   en: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
   ru: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
@@ -229,8 +228,8 @@ async function getSession(chatId: string): Promise<BotSession> {
   return memorySessions.get(chatId) ?? defaultSession(chatId)
 }
 
-async function saveSession(chatId: string, patch: Partial<BotSession>) {
-  const next = {
+async function saveSession(chatId: string, patch: Partial<BotSession>): Promise<BotSession> {
+  const next: BotSession = {
     ...(await getSession(chatId)),
     ...patch,
     chat_id: chatId,
@@ -240,7 +239,7 @@ async function saveSession(chatId: string, patch: Partial<BotSession>) {
   return next
 }
 
-async function resetSession(chatId: string, person?: { first_name?: string; last_name?: string; username?: string }, locale?: Locale | null) {
+async function resetSession(chatId: string, person?: { first_name?: string; last_name?: string; username?: string }, locale?: Locale | null): Promise<BotSession> {
   return saveSession(chatId, {
     ...defaultSession(chatId),
     locale: locale ?? null,
@@ -250,7 +249,7 @@ async function resetSession(chatId: string, person?: { first_name?: string; last
   })
 }
 
-async function ensureCustomer(session: BotSession) {
+async function ensureCustomer(session: BotSession): Promise<BotSession | null> {
   const customer = await upsertTelegramCustomer({
     chatId: session.chat_id,
     telegramName: session.telegram_name,
@@ -451,13 +450,9 @@ function pad2(n: number) {
   return String(n).padStart(2, '0')
 }
 
-// Builds an inline keyboard calendar grid for the given month.
-// Blocked dates show as ✖ and are non-interactive.
-// For end-date mode, dates on/before startDate and dates that would
-// create an overlap with a blocked range are also non-interactive (·).
 function buildCalendarKeyboard(
   year: number,
-  month: number, // 0-indexed
+  month: number,
   blockedRanges: VehicleBlockedRange[],
   mode: 'start' | 'end',
   locale: Locale,
@@ -483,7 +478,6 @@ function buildCalendarKeyboard(
   const dayRow: TelegramInlineButton[] = DAY_NAMES[locale].map((d) => ({ text: d, callback_data: 'cal:noop' }))
 
   const daysInMonth = new Date(year, month + 1, 0).getDate()
-  // Offset: getDay() returns 0=Sun..6=Sat; convert to Mon=0..Sun=6
   const firstDow = (new Date(year, month, 1).getDay() + 6) % 7
 
   const cells: Array<number | null> = []
@@ -581,7 +575,6 @@ async function sendCategoryCatalog(chatId: string, category: VehicleCategory, lo
       )
     } catch (error) {
       console.error('sendPhoto failed for vehicle', vehicle.id, error)
-      // Fall back to a text message so the customer can still book
       await sendMessage(
         chatId,
         formatVehicleCaption(vehicle, locale),
@@ -711,13 +704,11 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
-  // Calendar: no-op (blocked/past/disabled dates)
   if (data === 'cal:noop') {
     await answerCallbackQuery(callback.id)
     return
   }
 
-  // Calendar: user tapped a date
   if (data.startsWith('cal:select:')) {
     const selectedDate = data.slice('cal:select:'.length)
     const session = await getSession(chatId)
@@ -778,9 +769,8 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
-  // Calendar: month navigation — edit the existing message in-place
   if (data.startsWith('cal:nav:')) {
-    const parts = data.split(':') // ['cal', 'nav', 'start'|'end', 'YYYY-MM']
+    const parts = data.split(':')
     const mode = parts[2] as 'start' | 'end'
     const [navYear, navMonth] = parts[3].split('-').map(Number)
     const messageId = callback.message?.message_id
@@ -899,7 +889,6 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
-  // Date steps: user typed instead of tapping the calendar — re-show it
   if (session.step === 'awaiting_start_date') {
     const now = new Date()
     const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), session.blocked_ranges ?? [], 'start', locale)
