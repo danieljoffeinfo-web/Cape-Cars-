@@ -138,7 +138,7 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: 'Pending', value: counts.pending },
           { label: 'Confirmed booking', value: counts.confirmed_booking },
@@ -175,103 +175,194 @@ export default function BookingsPage() {
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center text-neutral-400 text-sm">No Telegram bookings in this stage yet.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-black/[0.06] text-[10px] tracking-[0.2em] uppercase text-neutral-400">
-                  <th className="text-left px-5 py-3 font-normal">Code</th>
-                  <th className="text-left px-5 py-3 font-normal">Customer</th>
-                  <th className="text-left px-5 py-3 font-normal hidden md:table-cell">Vehicle</th>
-                  <th className="text-left px-5 py-3 font-normal hidden md:table-cell">Dates</th>
-                  <th className="text-left px-5 py-3 font-normal hidden lg:table-cell">Total</th>
-                  <th className="text-left px-5 py-3 font-normal">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-black/[0.04]">
-                {filtered.map((booking) => {
-                  const holdUntil = pendingUntil(booking.created_at, booking.hold_expires_at)
-                  const holdExpired = booking.status === 'pending' && holdUntil.getTime() < Date.now()
+          <>
+            <div className="md:hidden divide-y divide-black/[0.06]">
+              {filtered.map((booking) => {
+                const holdUntil = pendingUntil(booking.created_at, booking.hold_expires_at)
+                const holdExpired = booking.status === 'pending' && holdUntil.getTime() < Date.now()
+                const isExpanded = expandedId === booking.id
 
-                  return (
-                    <>
-                      <tr key={booking.id} className="hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setExpandedId(expandedId === booking.id ? null : booking.id)}>
-                        <td className="px-5 py-4 font-medium text-neutral-900">{bookingCode(booking.id, booking.booking_code)}</td>
-                        <td className="px-5 py-4">
-                          <div className="font-medium text-neutral-900">{booking.telegram_customers?.full_name || booking.telegram_customers?.telegram_name || 'Unnamed customer'}</div>
-                          <div className="text-xs text-neutral-400 mt-0.5">{booking.telegram_customers?.phone || booking.chat_id}</div>
-                          {booking.status === 'pending' && (
-                            <div className={`text-[11px] mt-1 ${holdExpired ? 'text-red-500' : 'text-amber-600'}`}>
-                              Hold until {holdUntil.toLocaleString('en-ZA')}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 text-neutral-600 hidden md:table-cell">{booking.vehicle_name || '—'}</td>
-                        <td className="px-5 py-4 hidden md:table-cell text-neutral-500">
-                          {booking.start_date ? `${booking.start_date} → ${booking.end_date}` : '—'}
-                        </td>
-                        <td className="px-5 py-4 hidden lg:table-cell text-neutral-900">{booking.total_amount ? `R ${booking.total_amount.toLocaleString('en-ZA')}` : '—'}</td>
-                        <td className="px-5 py-4">
-                          <span className={`px-2.5 py-1 rounded-full text-[10px] tracking-[0.1em] uppercase font-medium border ${STATUS_STYLES[booking.status] || 'bg-neutral-50 border-black/[0.08] text-neutral-500'}`}>
-                            {booking.status.replace('_', ' ')}
-                          </span>
-                        </td>
-                      </tr>
-                      {expandedId === booking.id && (
-                        <tr key={`${booking.id}-expanded`} className="bg-neutral-50">
-                          <td colSpan={6} className="px-5 py-4">
-                            <div className="grid gap-4 md:grid-cols-4 text-sm">
-                              <div>
-                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Booking code</div>
-                                <div className="text-neutral-700">{bookingCode(booking.id, booking.booking_code)}</div>
+                return (
+                  <div key={booking.id} className="p-4">
+                    <button
+                      onClick={() => setExpandedId(isExpanded ? null : booking.id)}
+                      className="w-full text-left space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-medium text-neutral-900 text-sm break-words">{bookingCode(booking.id, booking.booking_code)}</div>
+                          <div className="mt-1 text-sm text-neutral-900 break-words">{booking.telegram_customers?.full_name || booking.telegram_customers?.telegram_name || 'Unnamed customer'}</div>
+                          <div className="text-xs text-neutral-400 mt-0.5 break-words">{booking.telegram_customers?.phone || booking.chat_id}</div>
+                        </div>
+                        <span className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] tracking-[0.1em] uppercase font-medium border ${STATUS_STYLES[booking.status] || 'bg-neutral-50 border-black/[0.08] text-neutral-500'}`}>
+                          {booking.status.replace('_', ' ')}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <div className="uppercase tracking-widest text-neutral-400 mb-1">Vehicle</div>
+                          <div className="text-neutral-700 break-words">{booking.vehicle_name || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="uppercase tracking-widest text-neutral-400 mb-1">Dates</div>
+                          <div className="text-neutral-700 break-words">{booking.start_date ? `${booking.start_date} → ${booking.end_date}` : '—'}</div>
+                        </div>
+                      </div>
+
+                      {booking.status === 'pending' && (
+                        <div className={`text-[11px] ${holdExpired ? 'text-red-500' : 'text-amber-600'}`}>
+                          Hold until {holdUntil.toLocaleString('en-ZA')}
+                        </div>
+                      )}
+                    </button>
+
+                    {isExpanded && (
+                      <div className="mt-4 space-y-4 border-t border-black/[0.06] pt-4">
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <div className="uppercase tracking-widest text-neutral-400 mb-1">Total</div>
+                            <div className="text-neutral-900">{booking.total_amount ? `R ${booking.total_amount.toLocaleString('en-ZA')}` : '—'}</div>
+                          </div>
+                          <div>
+                            <div className="uppercase tracking-widest text-neutral-400 mb-1">Days</div>
+                            <div className="text-neutral-900">{booking.total_days || 0} day(s)</div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-sm">
+                          {displayDoc(booking.id_file_id) ? <a className="block rounded-xl border border-black/[0.08] px-3 py-2 text-neutral-700" href={displayDoc(booking.id_file_id)!} target="_blank">View ID / passport</a> : <div className="rounded-xl border border-dashed border-black/[0.08] px-3 py-2 text-neutral-300">No ID / passport</div>}
+                          {displayDoc(booking.license_file_id) ? <a className="block rounded-xl border border-black/[0.08] px-3 py-2 text-neutral-700" href={displayDoc(booking.license_file_id)!} target="_blank">View license</a> : <div className="rounded-xl border border-dashed border-black/[0.08] px-3 py-2 text-neutral-300">No license</div>}
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          <button
+                            disabled={updatingId === booking.id || booking.status !== 'pending'}
+                            onClick={() => updateStatus(booking, 'confirmed_booking')}
+                            className="px-3 py-3 rounded-xl bg-blue-600 text-white text-sm disabled:opacity-40"
+                          >
+                            Confirm booking
+                          </button>
+                          <button
+                            disabled={updatingId === booking.id || (booking.status !== 'pending' && booking.status !== 'confirmed_booking')}
+                            onClick={() => updateStatus(booking, 'confirmed')}
+                            className="px-3 py-3 rounded-xl bg-emerald-600 text-white text-sm disabled:opacity-40"
+                          >
+                            Payment collected
+                          </button>
+                          <button
+                            disabled={updatingId === booking.id || booking.status === 'cancelled'}
+                            onClick={() => updateStatus(booking, 'cancelled')}
+                            className="px-3 py-3 rounded-xl bg-white border border-red-200 text-red-600 text-sm disabled:opacity-40"
+                          >
+                            Cancel booking
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-black/[0.06] text-[10px] tracking-[0.2em] uppercase text-neutral-400">
+                    <th className="text-left px-5 py-3 font-normal">Code</th>
+                    <th className="text-left px-5 py-3 font-normal">Customer</th>
+                    <th className="text-left px-5 py-3 font-normal">Vehicle</th>
+                    <th className="text-left px-5 py-3 font-normal">Dates</th>
+                    <th className="text-left px-5 py-3 font-normal hidden lg:table-cell">Total</th>
+                    <th className="text-left px-5 py-3 font-normal">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/[0.04]">
+                  {filtered.map((booking) => {
+                    const holdUntil = pendingUntil(booking.created_at, booking.hold_expires_at)
+                    const holdExpired = booking.status === 'pending' && holdUntil.getTime() < Date.now()
+
+                    return (
+                      <>
+                        <tr key={booking.id} className="hover:bg-neutral-50 transition-colors cursor-pointer" onClick={() => setExpandedId(expandedId === booking.id ? null : booking.id)}>
+                          <td className="px-5 py-4 font-medium text-neutral-900">{bookingCode(booking.id, booking.booking_code)}</td>
+                          <td className="px-5 py-4">
+                            <div className="font-medium text-neutral-900">{booking.telegram_customers?.full_name || booking.telegram_customers?.telegram_name || 'Unnamed customer'}</div>
+                            <div className="text-xs text-neutral-400 mt-0.5">{booking.telegram_customers?.phone || booking.chat_id}</div>
+                            {booking.status === 'pending' && (
+                              <div className={`text-[11px] mt-1 ${holdExpired ? 'text-red-500' : 'text-amber-600'}`}>
+                                Hold until {holdUntil.toLocaleString('en-ZA')}
                               </div>
-                              <div>
-                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Rental window</div>
-                                <div className="text-neutral-700">{booking.start_date || '—'}</div>
-                                <div className="text-xs text-neutral-500">{booking.total_days || 0} day(s)</div>
-                              </div>
-                              <div>
-                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Documents</div>
-                                <div className="flex flex-col gap-1">
-                                  {displayDoc(booking.id_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.id_file_id)!} target="_blank">View ID / passport</a> : <span className="text-neutral-300">No ID / passport</span>}
-                                  {displayDoc(booking.license_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.license_file_id)!} target="_blank">View license</a> : <span className="text-neutral-300">No license</span>}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Next action</div>
-                                <div className="flex flex-col gap-2">
-                                  <button
-                                    disabled={updatingId === booking.id || booking.status !== 'pending'}
-                                    onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'confirmed_booking') }}
-                                    className="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs disabled:opacity-40"
-                                  >
-                                    Confirm booking
-                                  </button>
-                                  <button
-                                    disabled={updatingId === booking.id || (booking.status !== 'pending' && booking.status !== 'confirmed_booking')}
-                                    onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'confirmed') }}
-                                    className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs disabled:opacity-40"
-                                  >
-                                    Payment collected
-                                  </button>
-                                  <button
-                                    disabled={updatingId === booking.id || booking.status === 'cancelled'}
-                                    onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'cancelled') }}
-                                    className="px-3 py-2 rounded-xl bg-white border border-red-200 text-red-600 text-xs disabled:opacity-40"
-                                  >
-                                    Cancel booking
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
+                            )}
+                          </td>
+                          <td className="px-5 py-4 text-neutral-600">{booking.vehicle_name || '—'}</td>
+                          <td className="px-5 py-4 text-neutral-500">
+                            {booking.start_date ? `${booking.start_date} → ${booking.end_date}` : '—'}
+                          </td>
+                          <td className="px-5 py-4 hidden lg:table-cell text-neutral-900">{booking.total_amount ? `R ${booking.total_amount.toLocaleString('en-ZA')}` : '—'}</td>
+                          <td className="px-5 py-4">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] tracking-[0.1em] uppercase font-medium border ${STATUS_STYLES[booking.status] || 'bg-neutral-50 border-black/[0.08] text-neutral-500'}`}>
+                              {booking.status.replace('_', ' ')}
+                            </span>
                           </td>
                         </tr>
-                      )}
-                    </>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                        {expandedId === booking.id && (
+                          <tr key={`${booking.id}-expanded`} className="bg-neutral-50">
+                            <td colSpan={6} className="px-5 py-4">
+                              <div className="grid gap-4 md:grid-cols-4 text-sm">
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Booking code</div>
+                                  <div className="text-neutral-700">{bookingCode(booking.id, booking.booking_code)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Rental window</div>
+                                  <div className="text-neutral-700">{booking.start_date || '—'}</div>
+                                  <div className="text-xs text-neutral-500">{booking.total_days || 0} day(s)</div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Documents</div>
+                                  <div className="flex flex-col gap-1">
+                                    {displayDoc(booking.id_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.id_file_id)!} target="_blank">View ID / passport</a> : <span className="text-neutral-300">No ID / passport</span>}
+                                    {displayDoc(booking.license_file_id) ? <a className="text-neutral-700 underline underline-offset-2" href={displayDoc(booking.license_file_id)!} target="_blank">View license</a> : <span className="text-neutral-300">No license</span>}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-1">Next action</div>
+                                  <div className="flex flex-col gap-2">
+                                    <button
+                                      disabled={updatingId === booking.id || booking.status !== 'pending'}
+                                      onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'confirmed_booking') }}
+                                      className="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs disabled:opacity-40"
+                                    >
+                                      Confirm booking
+                                    </button>
+                                    <button
+                                      disabled={updatingId === booking.id || (booking.status !== 'pending' && booking.status !== 'confirmed_booking')}
+                                      onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'confirmed') }}
+                                      className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs disabled:opacity-40"
+                                    >
+                                      Payment collected
+                                    </button>
+                                    <button
+                                      disabled={updatingId === booking.id || booking.status === 'cancelled'}
+                                      onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'cancelled') }}
+                                      className="px-3 py-2 rounded-xl bg-white border border-red-200 text-red-600 text-xs disabled:opacity-40"
+                                    >
+                                      Cancel booking
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>
