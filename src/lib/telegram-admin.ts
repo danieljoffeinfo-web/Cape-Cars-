@@ -103,7 +103,7 @@ function publicBaseUrl() {
 
 function bookingHoldIsActive(booking: { status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }) {
   if (booking.released_at) return false
-  return ['confirmed_booking', 'confirmed', 'payment_collected'].includes(booking.status)
+  return ['customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'confirmed', 'payment_collected'].includes(booking.status)
 }
 
 export function buildTelegramProxyUrl(fileId: string) {
@@ -493,7 +493,7 @@ export async function getAvailableVehiclesForCategory(category: string) {
         .from('telegram_bookings')
         .select('vehicle_name, status, created_at, hold_expires_at, released_at')
         .eq('vehicle_category', category)
-        .in('status', ['confirmed_booking', 'confirmed', 'payment_collected']),
+        .in('status', ['customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'confirmed', 'payment_collected']),
     ])
 
     let safeBookings: any = bookings
@@ -502,7 +502,7 @@ export async function getAvailableVehiclesForCategory(category: string) {
         .from('telegram_bookings')
         .select('vehicle_name, status, created_at')
         .eq('vehicle_category', category)
-        .in('status', ['confirmed_booking', 'confirmed', 'payment_collected'])
+        .in('status', ['customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'confirmed', 'payment_collected'])
 
       if (legacy.error) {
         console.error('getAvailableVehiclesForCategory bookings failed', legacy.error)
@@ -611,7 +611,7 @@ export async function getVehiclesForCustomerCategory(category: string) {
         .from('telegram_bookings')
         .select('vehicle_name, start_date, end_date, status, created_at, hold_expires_at, released_at')
         .eq('vehicle_category', category)
-        .in('status', ['confirmed_booking', 'confirmed', 'payment_collected']),
+        .in('status', ['customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'confirmed', 'payment_collected']),
       supabase
         .from('rentals')
         .select('vehicle_id, start_date, end_date, status')

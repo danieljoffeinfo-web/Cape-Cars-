@@ -170,12 +170,12 @@ const TEXT = {
     ru: 'Спасибо. Теперь отправьте чёткое фото водительского удостоверения.',
   },
   done: {
-    en: (bookingCode: string) => `Perfect. Your booking request ${bookingCode} has been sent to Cape Cars and is now pending confirmation for 24 hours. We'll confirm it with you shortly.`,
-    ru: (bookingCode: string) => `Отлично. Ваша заявка ${bookingCode} отправлена в Cape Cars и сейчас ожидает подтверждения в течение 24 часов. Мы скоро свяжемся с вами для подтверждения.`,
+    en: (bookingCode: string) => `Perfect. Your booking ${bookingCode} is confirmed in the Cape Cars system and the dates are now reserved. We'll send you the next steps shortly.`,
+    ru: (bookingCode: string) => `Отлично. Ваше бронирование ${bookingCode} подтверждено в системе Cape Cars, и даты уже зарезервированы. Скоро отправим вам следующие шаги.`,
   },
   alreadyCompleted: {
-    en: (bookingCode: string) => `Your booking request ${bookingCode} is already pending with Cape Cars. We'll confirm it with you shortly. Send /start only if you want to begin a new booking.`,
-    ru: (bookingCode: string) => `Ваша заявка ${bookingCode} уже ожидает подтверждения в Cape Cars. Мы скоро свяжемся с вами. Отправьте /start, только если хотите начать новое бронирование.`,
+    en: (bookingCode: string) => `Your booking ${bookingCode} is already locked in Cape Cars and those dates are reserved. Send /start only if you want to begin a new booking.`,
+    ru: (bookingCode: string) => `Ваше бронирование ${bookingCode} уже зафиксировано в Cape Cars, и эти даты зарезервированы. Отправьте /start, только если хотите начать новое бронирование.`,
   },
   vehicleNotFound: {
     en: 'Vehicle not found',
