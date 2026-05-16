@@ -601,7 +601,7 @@ export async function getVehiclesForCustomerCategory(category: string) {
   try {
     await releaseExpiredPendingBookings()
 
-    const [{ data: vehicles, error: vehiclesError }, { data: bookings, error: bookingsError }, { data: rentals, error: rentalsError }] = await Promise.all([
+    const [{ data: vehicles, error: vehiclesError }, bookingsResult, { data: rentals, error: rentalsError }] = await Promise.all([
       supabase
         .from('vehicles')
         .select('id, model, cat, rate, status, image_url, color, fuel, seats')
@@ -617,6 +617,20 @@ export async function getVehiclesForCustomerCategory(category: string) {
         .select('vehicle_id, start_date, end_date, status')
         .in('status', ['pending', 'confirmed'])
     ])
+
+    let bookings: Array<{ vehicle_name: string | null, start_date: string | null, end_date: string | null, status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }> | null = (bookingsResult.data as Array<{ vehicle_name: string | null, start_date: string | null, end_date: string | null, status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }> | null)
+    let bookingsError = bookingsResult.error
+
+    if (bookingsError && isMissingColumnError(bookingsError)) {
+      const legacy = await supabase
+        .from('telegram_bookings')
+        .select('vehicle_name, start_date, end_date, status, created_at')
+        .eq('vehicle_category', category)
+        .in('status', ['customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'confirmed', 'payment_collected'])
+
+      bookings = (legacy.data as Array<{ vehicle_name: string | null, start_date: string | null, end_date: string | null, status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }> | null)
+      bookingsError = legacy.error
+    }
 
     if (vehiclesError || bookingsError || rentalsError) {
       console.error('getVehiclesForCustomerCategory failed', { vehiclesError, bookingsError, rentalsError })
